@@ -1,165 +1,314 @@
-"""GoFactory 메인 Streamlit 애플리케이션.
+"""GoFactory 면접 연습 챗봇 메인 애플리케이션.
 
-GoFactory 챗봇의 진입점으로, 전체 UI 레이아웃과 이벤트 루프를 관리한다.
-DeepSeek 무료 AI 모델을 OpenAI 호환 API를 통해 연동하며,
-사용자는 웹 브라우저에서 별도 설치 없이 AI와 대화할 수 있다.
+AI 면접관과 함께 면접을 연습할 수 있는 Streamlit 웹 앱.
+Google Gemini API를 사용하여 직무별 면접 질문 생성 및 답변 피드백을 제공한다.
 """
 
 import streamlit as st
-from openai import AuthenticationError, APIError
 
-from chat_engine import ChatEngine
 from ai_client import AIClient
 from config import ConfigManager
+from database import InterviewDB
+from chat_engine import ChatEngine
+
+
+# 직무 목록
+JOB_FIELDS = ["반도체", "백엔드", "데이터", "마케팅", "기타 (직접 입력)"]
 
 
 def init_session_state():
-    """session_state 초기화.
+    """session_state 초기화."""
+    defaults = {
+        "api_key": None,
+        "chat_history": [],
+        "current_question": None,
+        "job_field": None,
+        "interview_active": False,
+        "feedback": None,
+        "question_count": 0,
+        "show_records": False,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-    messages, api_key, is_generating 키가 없으면 기본값으로 초기화한다.
-    """
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
-    if "api_key" not in st.session_state:
-        st.session_state["api_key"] = None
-    if "is_generating" not in st.session_state:
-        st.session_state["is_generating"] = False
 
-
-def render_sidebar(config: ConfigManager, engine: ChatEngine):
-    """사이드바 렌더링: API 키 입력 및 새 대화 버튼.
+def render_sidebar(config: ConfigManager, db: InterviewDB):
+    """사이드바 렌더링: 직무 선택, 면접 시작, 기록 조회.
 
     Args:
         config: 설정 관리자 인스턴스
-        engine: 대화 관리 엔진 인스턴스
+        db: 데이터베이스 인스턴스
     """
     with st.sidebar:
-        st.header("⚙️ 설정")
+        st.header("🎯 면접 설정")
 
-        # API 키 입력 필드 (password 타입)
-        api_key_input = st.text_input(
-            "Groq API 키",
-            type="password",
-            value=config.get_api_key() or "",
-            placeholder="gsk_...",
-            help="Groq API 키를 입력하세요. 키는 세션 동안만 유지됩니다.",
+        # API 키 입력 (환경변수 미설정 시에만 표시)
+        if not config.is_configured():
+            api_key_input = st.text_input(
+                "Gemini API 키",
+                type="password",
+                placeholder="AIzaSy...",
+                help="Google Gemini API 키를 입력하세요.",
+            )
+            if api_key_input and api_key_input.strip():
+                config.set_api_key(api_key_input.strip())
+                st.rerun()
+
+        # 직무 선택
+        st.subheader("📋 직무 선택")
+        selected_job = st.selectbox(
+            "면접 직무를 선택하세요",
+            JOB_FIELDS,
+            index=0,
+            label_visibility="collapsed",
         )
 
-        # API 키가 변경되면 세션에 저장
-        if api_key_input and api_key_input.strip():
-            config.set_api_key(api_key_input.strip())
+        # 기타 직접 입력
+        if selected_job == "기타 (직접 입력)":
+            custom_job = st.text_input(
+                "직무명 입력",
+                placeholder="예: 프론트엔드, AI/ML, 기계공학...",
+            )
+            if custom_job and custom_job.strip():
+                selected_job = custom_job.strip()
+            else:
+                selected_job = None
 
-        # 새 대화 버튼
-        if st.button("🔄 새 대화", use_container_width=True):
-            engine.reset()
-            st.session_state["is_generating"] = False
+        # 면접 시작 버튼
+        st.divider()
+        if st.button("🚀 면접 시작", use_container_width=True, type="primary"):
+            if not config.is_configured():
+                st.error("⚠️ API 키를 먼저 입력해주세요.")
+            elif selected_job is None:
+                st.error("⚠️ 직무명을 입력해주세요.")
+            else:
+                st.session_state["job_field"] = selected_job
+                st.session_state["interview_active"] = True
+                st.session_state["current_question"] = None
+                st.session_state["feedback"] = None
+                st.session_state["question_count"] = 0
+                st.session_state["chat_history"] = []
+                st.session_state["show_records"] = False
+                st.rerun()
+
+        # 면접 종료 버튼
+        if st.session_state.get("interview_active"):
+            if st.button("⏹️ 면접 종료", use_container_width=True):
+                st.session_state["interview_active"] = False
+                st.session_state["current_question"] = None
+                st.session_state["feedback"] = None
+                st.rerun()
+
+        # 기록 조회
+        st.divider()
+        st.subheader("📚 면접 기록")
+        record_count = db.get_record_count()
+        st.caption(f"총 {record_count}개의 면접 기록")
+
+        if st.button("📖 기록 보기", use_container_width=True):
+            st.session_state["show_records"] = True
+            st.session_state["interview_active"] = False
             st.rerun()
 
-
-def render_chat_history(engine: ChatEngine):
-    """대화 이력을 채팅 인터페이스에 표시.
-
-    Args:
-        engine: 대화 관리 엔진 인스턴스
-    """
-    for message in engine.get_history():
-        role = message["role"]
-        avatar = "👤" if role == "user" else "🏭"
-        with st.chat_message(role, avatar=avatar):
-            st.markdown(message["content"])
+        if st.session_state.get("show_records"):
+            if st.button("🔙 돌아가기", use_container_width=True):
+                st.session_state["show_records"] = False
+                st.rerun()
 
 
-def handle_user_input(user_input: str, config: ConfigManager, engine: ChatEngine):
-    """사용자 메시지 입력 처리 및 AI 응답 생성.
+def render_daily_question(config: ConfigManager):
+    """오늘의 질문 표시."""
+    st.subheader("💡 오늘의 면접 질문")
 
-    Args:
-        user_input: 사용자가 입력한 메시지
-        config: 설정 관리자 인스턴스
-        engine: 대화 관리 엔진 인스턴스
-    """
-    # 빈 메시지 차단
-    if not user_input or not user_input.strip():
-        return
-
-    # 입력 길이 제한 (1000자)
-    if len(user_input) > 1000:
-        st.error("📝 메시지는 1000자 이내로 입력해주세요.")
-        return
-
-    # API 키 미설정 시 차단
     if not config.is_configured():
-        st.warning("⚠️ 사이드바에서 API 키를 입력해주세요.")
+        st.info("API 키를 설정하면 오늘의 질문을 확인할 수 있습니다.")
         return
 
-    # 사용자 메시지 추가
-    engine.add_user_message(user_input)
-
-    # 사용자 메시지 즉시 표시
-    with st.chat_message("user", avatar="👤"):
-        st.markdown(user_input)
-
-    # AI 응답 생성
-    try:
-        st.session_state["is_generating"] = True
-        with st.spinner("생각 중..."):
+    if "daily_question" not in st.session_state:
+        try:
             ai_client = AIClient(config.get_api_key())
-            # 시스템 프롬프트 + 대화 이력
-            system_message = {
-                "role": "system",
-                "content": "너는 GoFactory라는 이름의 친절한 AI 어시스턴트야. 반드시 한국어로만 답변해. 절대로 중국어, 일본어, 영어 등 다른 언어의 문자를 섞지 마. 한글과 숫자, 영문 고유명사만 사용해. 자연스럽고 친근한 반말 말투를 사용해."
-            }
-            messages = [system_message] + engine.get_api_messages()
-            response = ai_client.generate_response(messages)
-            engine.add_assistant_message(response)
+            daily_q = ai_client.generate_daily_question()
+            st.session_state["daily_question"] = daily_q
+        except Exception:
+            st.session_state["daily_question"] = "오늘의 질문을 불러오는 데 실패했습니다."
 
-        # AI 응답 표시
-        with st.chat_message("assistant", avatar="🏭"):
-            st.markdown(response)
+    st.info(f"**Q.** {st.session_state['daily_question']}")
 
-    except TimeoutError:
-        st.error("⏱️ 응답 시간이 초과되었습니다. 다시 시도해주세요.")
-    except AuthenticationError:
-        st.error("🔑 API 키가 유효하지 않습니다. 사이드바에서 확인해주세요.")
-    except APIError as e:
-        # 토큰 제한 초과 등 API 오류 처리
-        error_message = str(e).lower()
-        if "token" in error_message or "length" in error_message:
-            st.error("📝 대화가 너무 길어졌습니다. '새 대화'를 시작해주세요.")
-        else:
-            st.error("❌ 응답 생성에 실패했습니다. 잠시 후 다시 시도해주세요.")
-    except Exception:
-        st.error("❌ 응답 생성에 실패했습니다. 잠시 후 다시 시도해주세요.")
-    finally:
-        st.session_state["is_generating"] = False
+
+def render_interview(config: ConfigManager, db: InterviewDB):
+    """면접 진행 화면 렌더링."""
+    job_field = st.session_state["job_field"]
+    st.subheader(f"🎤 {job_field} 직무 면접 진행 중")
+    st.caption(f"질문 #{st.session_state['question_count'] + 1}")
+
+    # 질문 생성
+    if st.session_state["current_question"] is None:
+        with st.spinner("면접 질문을 생성하고 있습니다..."):
+            try:
+                ai_client = AIClient(config.get_api_key())
+                question = ai_client.generate_question(job_field)
+                st.session_state["current_question"] = question
+                st.session_state["feedback"] = None
+            except Exception as e:
+                st.error(f"❌ 질문 생성 실패: {e}")
+                return
+
+    # 질문 표시
+    st.markdown("---")
+    st.markdown(f"### 📝 질문")
+    st.markdown(f"> {st.session_state['current_question']}")
+    st.markdown("---")
+
+    # 피드백이 아직 없으면 답변 입력 폼 표시
+    if st.session_state["feedback"] is None:
+        with st.form(key="answer_form"):
+            user_answer = st.text_area(
+                "답변을 입력하세요",
+                height=200,
+                placeholder="면접 질문에 대한 답변을 작성해주세요...",
+            )
+            submitted = st.form_submit_button("📤 답변 제출", type="primary", use_container_width=True)
+
+            if submitted:
+                if not user_answer or not user_answer.strip():
+                    st.error("⚠️ 답변을 입력해주세요.")
+                else:
+                    with st.spinner("AI가 답변을 평가하고 있습니다..."):
+                        try:
+                            ai_client = AIClient(config.get_api_key())
+                            feedback = ai_client.evaluate_answer(
+                                st.session_state["current_question"],
+                                user_answer.strip(),
+                                job_field,
+                            )
+                            st.session_state["feedback"] = feedback
+                            st.session_state["last_answer"] = user_answer.strip()
+                            st.session_state["question_count"] += 1
+
+                            # DB에 저장
+                            db.save_interview(
+                                job_field=job_field,
+                                question=st.session_state["current_question"],
+                                answer=user_answer.strip(),
+                                feedback=feedback,
+                            )
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ 평가 실패: {e}")
+    else:
+        # 피드백 표시
+        st.markdown("### 💬 내 답변")
+        st.markdown(st.session_state.get("last_answer", ""))
+
+        st.markdown("### 📊 AI 피드백")
+        st.markdown(st.session_state["feedback"])
+
+        # 다음 질문 / 면접 종료 버튼
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("➡️ 다음 질문", use_container_width=True, type="primary"):
+                st.session_state["current_question"] = None
+                st.session_state["feedback"] = None
+                st.rerun()
+        with col2:
+            if st.button("⏹️ 면접 종료", use_container_width=True):
+                st.session_state["interview_active"] = False
+                st.session_state["current_question"] = None
+                st.session_state["feedback"] = None
+                st.rerun()
+
+
+def render_records(db: InterviewDB):
+    """면접 기록 조회 화면."""
+    st.subheader("📚 면접 기록")
+
+    records = db.get_all_records()
+
+    if not records:
+        st.info("아직 저장된 면접 기록이 없습니다. 면접을 시작해보세요!")
+        return
+
+    # 직무별 필터
+    job_fields_in_records = list(set(r["job_field"] for r in records))
+    filter_job = st.selectbox(
+        "직무별 필터",
+        ["전체"] + sorted(job_fields_in_records),
+    )
+
+    if filter_job != "전체":
+        records = [r for r in records if r["job_field"] == filter_job]
+
+    st.caption(f"총 {len(records)}개의 기록")
+
+    # 기록 표시
+    for i, record in enumerate(records):
+        with st.expander(f"📌 [{record['job_field']}] {record['question'][:50]}... ({record['date'][:10]})"):
+            st.markdown(f"**날짜:** {record['date']}")
+            st.markdown(f"**직무:** {record['job_field']}")
+            st.markdown(f"**질문:** {record['question']}")
+            st.markdown("---")
+            st.markdown(f"**내 답변:**")
+            st.markdown(record['answer'])
+            st.markdown("---")
+            st.markdown(f"**AI 피드백:**")
+            st.markdown(record['feedback'])
+
+
+def render_home(config: ConfigManager):
+    """홈 화면 (면접 비활성 상태)."""
+    st.markdown(
+        """
+        ### 👋 환영합니다!
+
+        **GoFactory 면접 연습**은 AI 면접관과 함께 실전 면접을 연습할 수 있는 서비스입니다.
+
+        #### 사용 방법:
+        1. 🎯 사이드바에서 **직무를 선택**하세요
+        2. 🚀 **면접 시작** 버튼을 클릭하세요
+        3. 📝 AI가 생성한 질문에 **답변을 작성**하세요
+        4. 📊 AI가 **논리성, 키워드, 개선점**을 피드백해줍니다
+        5. 📚 면접 기록은 자동으로 **저장**됩니다
+
+        ---
+        """
+    )
+
+    # 오늘의 질문
+    render_daily_question(config)
 
 
 def main():
-    """GoFactory 메인 애플리케이션."""
+    """GoFactory 면접 연습 메인 애플리케이션."""
     # 페이지 설정
-    st.set_page_config(page_title="GoFactory", page_icon="🏭")
+    st.set_page_config(
+        page_title="GoFactory 면접 연습",
+        page_icon="🎯",
+        layout="centered",
+    )
 
     # session_state 초기화
     init_session_state()
 
     # 모듈 초기화
     config = ConfigManager(st.session_state)
-    engine = ChatEngine(st.session_state)
+    db = InterviewDB()
 
     # 페이지 헤더
-    st.title("🏭 GoFactory")
-    st.caption("Groq AI 기반 개인 맞춤형 챗봇입니다. 자유롭게 대화해보세요.")
+    st.title("🎯 GoFactory 면접 연습")
+    st.caption("AI 면접관과 함께하는 실전 면접 연습 서비스")
 
     # 사이드바 렌더링
-    render_sidebar(config, engine)
+    render_sidebar(config, db)
 
-    # 대화 이력 표시
-    render_chat_history(engine)
-
-    # 메시지 입력
-    user_input = st.chat_input("메시지를 입력하세요...")
-
-    if user_input:
-        handle_user_input(user_input, config, engine)
+    # 메인 콘텐츠
+    if st.session_state.get("show_records"):
+        render_records(db)
+    elif st.session_state.get("interview_active"):
+        render_interview(config, db)
+    else:
+        render_home(config)
 
 
 if __name__ == "__main__":

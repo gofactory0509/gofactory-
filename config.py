@@ -3,7 +3,7 @@
 API 키 및 앱 설정을 관리한다.
 설정 우선순위:
 1. 사이드바에서 사용자가 직접 입력한 API 키 (session_state)
-2. 환경 변수 (DEEPSEEK_API_KEY)
+2. 환경 변수 (GEMINI_API_KEY)
 3. .env 파일
 """
 
@@ -18,7 +18,7 @@ class ConfigManager:
     환경 변수, .env 파일, session_state를 통해 API 키를 관리한다.
     """
 
-    ENV_KEY_NAME = "GROQ_API_KEY"
+    ENV_KEY_NAME = "GEMINI_API_KEY"
     SESSION_KEY_NAME = "api_key"
 
     def __init__(self, session_state):
@@ -43,11 +43,6 @@ class ConfigManager:
     def get_api_key(self) -> str | None:
         """현재 설정된 API 키 반환 (없으면 None)
 
-        우선순위:
-        1. session_state에 저장된 키 (사이드바 입력)
-        2. 환경 변수 (DEEPSEEK_API_KEY)
-        3. .env 파일 (load_dotenv로 이미 로드됨)
-
         Returns:
             str | None: 설정된 API 키 또는 None
         """
@@ -65,9 +60,6 @@ class ConfigManager:
 
     def set_api_key(self, api_key: str) -> None:
         """API 키를 세션에 저장
-
-        사이드바에서 사용자가 직접 입력한 API 키를 session_state에 저장한다.
-        이 키는 환경 변수보다 높은 우선순위를 가진다.
 
         Args:
             api_key: 저장할 API 키 문자열
