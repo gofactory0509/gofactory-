@@ -27,7 +27,7 @@ class AIClient:
             try:
                 genai.configure(api_key=gemini_key)
                 self.gemini_model = genai.GenerativeModel(
-                    "gemini-2.0-flash-lite",
+                    "gemini-2.0-flash",
                     system_instruction=SYSTEM_PROMPT,
                 )
             except Exception:
