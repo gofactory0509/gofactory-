@@ -103,7 +103,13 @@ def handle_user_input(user_input: str, config: ConfigManager, engine: ChatEngine
         st.session_state["is_generating"] = True
         with st.spinner("생각 중..."):
             ai_client = AIClient(config.get_api_key())
-            response = ai_client.generate_response(engine.get_api_messages())
+            # 시스템 프롬프트 + 대화 이력
+            system_message = {
+                "role": "system",
+                "content": "너는 GoFactory라는 이름의 친절한 AI 어시스턴트야. 항상 한국어로만 답변해. 자연스럽고 친근한 말투를 사용해."
+            }
+            messages = [system_message] + engine.get_api_messages()
+            response = ai_client.generate_response(messages)
             engine.add_assistant_message(response)
 
         # AI 응답 표시
