@@ -1,88 +1,88 @@
 """AI 클라이언트 모듈.
 
-Google Gemini API를 사용하여 면접 질문 생성 및 답변 평가를 수행한다.
+Google Gemini API를 기본으로 사용하고, 실패 시 Groq API로 자동 전환한다.
 """
 
 import google.generativeai as genai
+from openai import OpenAI
 
 
 SYSTEM_PROMPT = (
     "너는 전문 면접관이야. 사용자가 선택한 직무에 맞는 면접 질문을 하고, "
     "답변에 대해 논리성, 핵심 키워드 포함 여부, 개선점을 구체적으로 피드백해줘. "
-    "항상 한국어로 답변해."
+    "반드시 한국어로만 답변해. 절대 중국어나 다른 언어를 섞지 마."
 )
 
 
 class AIClient:
-    """Google Gemini AI 클라이언트.
+    """AI 클라이언트 (Gemini 우선, Groq 백업)."""
 
-    Gemini 2.0 Flash 모델을 사용하여 면접 질문 생성 및 답변 평가를 수행한다.
-    """
+    def __init__(self, gemini_key: str = None, groq_key: str = None):
+        self.gemini_key = gemini_key
+        self.groq_key = groq_key
+        self.using_groq = False
 
-    MODEL_NAME: str = "gemini-2.0-flash-lite"
+        # Gemini 설정
+        if gemini_key and gemini_key.strip():
+            try:
+                genai.configure(api_key=gemini_key)
+                self.gemini_model = genai.GenerativeModel(
+                    "gemini-2.0-flash-lite",
+                    system_instruction=SYSTEM_PROMPT,
+                )
+            except Exception:
+                self.gemini_model = None
+        else:
+            self.gemini_model = None
 
-    def __init__(self, api_key: str):
-        """Gemini 클라이언트 초기화.
-
-        Args:
-            api_key: Google Gemini API 인증 키
-
-        Raises:
-            ValueError: api_key가 빈 문자열이거나 None인 경우
-        """
-        if not self.validate_api_key(api_key):
-            raise ValueError(
-                "API 키가 유효하지 않습니다. 빈 문자열이거나 None일 수 없습니다."
+        # Groq 백업 설정
+        if groq_key and groq_key.strip():
+            self.groq_client = OpenAI(
+                api_key=groq_key,
+                base_url="https://api.groq.com/openai/v1",
             )
+        else:
+            self.groq_client = None
 
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(
-            self.MODEL_NAME,
-            system_instruction=SYSTEM_PROMPT,
+    def _call_groq(self, prompt: str) -> str:
+        """Groq API로 응답 생성."""
+        response = self.groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
         )
+        return response.choices[0].message.content
 
-    def generate_response(self, messages: list[dict]) -> str:
-        """대화 이력 기반 AI 응답 생성.
+    def _call_gemini(self, prompt: str) -> str:
+        """Gemini API로 응답 생성."""
+        response = self.gemini_model.generate_content(prompt)
+        return response.text.strip()
 
-        Args:
-            messages: Gemini 형식의 메시지 목록
-                      [{"role": "user"|"model", "parts": [str]}, ...]
+    def _call(self, prompt: str) -> str:
+        """Gemini 시도 → 실패 시 Groq으로 자동 전환."""
+        # Gemini 먼저 시도
+        if self.gemini_model and not self.using_groq:
+            try:
+                return self._call_gemini(prompt)
+            except Exception:
+                self.using_groq = True
 
-        Returns:
-            str: AI 생성 응답 텍스트
-        """
-        chat = self.model.start_chat(history=messages[:-1] if len(messages) > 1 else [])
-        last_message = messages[-1]["parts"][0] if messages else ""
-        response = chat.send_message(last_message)
-        return response.text
+        # Groq 백업
+        if self.groq_client:
+            return self._call_groq(prompt)
+
+        raise RuntimeError("사용 가능한 AI 모델이 없습니다. API 키를 확인해주세요.")
 
     def generate_question(self, job_field: str) -> str:
-        """선택한 직무에 맞는 면접 질문 생성.
-
-        Args:
-            job_field: 직무 분야 (예: 반도체, 백엔드, 데이터, 마케팅)
-
-        Returns:
-            str: 생성된 면접 질문
-        """
         prompt = (
             f"'{job_field}' 직무 면접에서 나올 수 있는 실전 면접 질문을 하나만 생성해줘. "
             f"질문만 간결하게 출력해. 번호나 부가 설명 없이 질문 하나만."
         )
-        response = self.model.generate_content(prompt)
-        return response.text.strip()
+        return self._call(prompt)
 
     def evaluate_answer(self, question: str, answer: str, job_field: str) -> str:
-        """사용자 답변을 평가하고 피드백 제공.
-
-        Args:
-            question: 면접 질문
-            answer: 사용자의 답변
-            job_field: 직무 분야
-
-        Returns:
-            str: 평가 피드백 (논리성, 키워드, 개선점 포함)
-        """
         prompt = (
             f"직무: {job_field}\n"
             f"면접 질문: {question}\n"
@@ -94,33 +94,18 @@ class AIClient:
             f"4. **총평**: 전체적인 한줄 평가\n\n"
             f"친절하지만 전문적인 톤으로 피드백해줘."
         )
-        response = self.model.generate_content(prompt)
-        return response.text.strip()
+        return self._call(prompt)
 
     def generate_daily_question(self) -> str:
-        """오늘의 랜덤 면접 질문 생성.
-
-        Returns:
-            str: 랜덤 면접 질문
-        """
         prompt = (
             "취업 면접에서 자주 나오는 공통 질문 중 하나를 랜덤으로 생성해줘. "
             "직무 무관하게 인성/역량 면접 질문이면 좋겠어. "
             "질문만 간결하게 출력해."
         )
-        response = self.model.generate_content(prompt)
-        return response.text.strip()
+        return self._call(prompt)
 
     @staticmethod
     def validate_api_key(api_key: str) -> bool:
-        """API 키 형식 유효성 검증.
-
-        Args:
-            api_key: 검증할 API 키 문자열
-
-        Returns:
-            bool: API 키가 유효하면 True
-        """
         if api_key is None:
             return False
         if not isinstance(api_key, str):
