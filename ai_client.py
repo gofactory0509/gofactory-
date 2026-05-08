@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """AI 클라이언트 모듈.
 
 Google Gemini API를 기본으로 사용하고, 실패 시 Groq API로 자동 전환한다.
@@ -76,11 +77,13 @@ class AIClient:
 
         raise RuntimeError("사용 가능한 AI 모델이 없습니다. API 키를 확인해주세요.")
 
-    def generate_question(self, job_field: str) -> str:
+    def generate_question(self, job_field: str, context_hint: str = "") -> str:
         prompt = (
             f"'{job_field}' 직무 면접에서 나올 수 있는 실전 면접 질문을 하나만 생성해줘. "
             f"질문만 간결하게 출력해. 번호나 부가 설명 없이 질문 하나만."
         )
+        if context_hint:
+            prompt += context_hint
         return self._call(prompt)
 
     def evaluate_answer(self, question: str, answer: str, job_field: str) -> str:
