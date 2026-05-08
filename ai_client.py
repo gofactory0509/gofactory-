@@ -19,7 +19,7 @@ class AIClient:
     Gemini 2.0 Flash 모델을 사용하여 면접 질문 생성 및 답변 평가를 수행한다.
     """
 
-    MODEL_NAME: str = "gemini-2.0-flash"
+    MODEL_NAME: str = "gemini-1.5-flash"
 
     def __init__(self, api_key: str):
         """Gemini 클라이언트 초기화.
