@@ -106,7 +106,7 @@ def handle_user_input(user_input: str, config: ConfigManager, engine: ChatEngine
             # 시스템 프롬프트 + 대화 이력
             system_message = {
                 "role": "system",
-                "content": "너는 GoFactory라는 이름의 친절한 AI 어시스턴트야. 항상 한국어로만 답변해. 자연스럽고 친근한 말투를 사용해."
+                "content": "너는 GoFactory라는 이름의 친절한 AI 어시스턴트야. 반드시 한국어로만 답변해. 절대로 중국어, 일본어, 영어 등 다른 언어의 문자를 섞지 마. 한글과 숫자, 영문 고유명사만 사용해. 자연스럽고 친근한 반말 말투를 사용해."
             }
             messages = [system_message] + engine.get_api_messages()
             response = ai_client.generate_response(messages)
