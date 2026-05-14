@@ -55,6 +55,7 @@ class InterviewDB:
 
     면접 세션의 질문, 답변, 피드백을 저장하고 조회하는 기능을 제공한다.
     직무별 기출 질문 관리 및 통계 기능을 포함한다.
+    자소서 저장 및 사용자 피드백 수집 기능을 포함한다.
     """
 
     def __init__(self, db_path: str = "interviews.db"):
@@ -69,12 +70,13 @@ class InterviewDB:
         self._seed_common_questions()
 
     def _create_tables(self):
-        """면접 기록 및 질문 뱅크 테이블 생성."""
+        """면접 기록, 질문 뱅크, 자소서, 피드백 테이블 생성."""
         self.conn.execute('''
             CREATE TABLE IF NOT EXISTS interviews (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
                 job_field TEXT NOT NULL,
+                interview_type TEXT DEFAULT '직무면접',
                 question TEXT NOT NULL,
                 answer TEXT NOT NULL,
                 feedback TEXT NOT NULL,
@@ -98,6 +100,29 @@ class InterviewDB:
                 created_at TEXT NOT NULL
             )
         ''')
+        self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS resumes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_field TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                rating INTEGER NOT NULL,
+                comment TEXT,
+                feature_request TEXT
+            )
+        ''')
+        # interview_type 컬럼 마이그레이션 (기존 DB 호환)
+        try:
+            self.conn.execute('ALTER TABLE interviews ADD COLUMN interview_type TEXT DEFAULT "직무면접"')
+        except Exception:
+            pass
         self.conn.commit()
 
     def _seed_common_questions(self):
@@ -115,7 +140,7 @@ class InterviewDB:
                 )
         self.conn.commit()
 
-    def save_interview(self, job_field: str, question: str, answer: str, feedback: str, score: int | None = None):
+    def save_interview(self, job_field: str, question: str, answer: str, feedback: str, score: int | None = None, interview_type: str = "직무면접"):
         """면접 기록 저장.
 
         Args:
@@ -124,12 +149,13 @@ class InterviewDB:
             answer: 사용자 답변
             feedback: AI 피드백
             score: 논리성 점수 (선택)
+            interview_type: 면접 유형 (직무면접/인성면접/자소서기반면접)
         """
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.conn.execute(
-            '''INSERT INTO interviews (date, job_field, question, answer, feedback, score)
-               VALUES (?, ?, ?, ?, ?, ?)''',
-            (now, job_field, question, answer, feedback, score)
+            '''INSERT INTO interviews (date, job_field, interview_type, question, answer, feedback, score)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (now, job_field, interview_type, question, answer, feedback, score)
         )
         self.conn.commit()
 
@@ -259,3 +285,100 @@ class InterviewDB:
     def close(self):
         """데이터베이스 연결 종료."""
         self.conn.close()
+
+    # ─── 자소서 관련 메서드 ───
+
+    def save_resume(self, job_field: str, content: str) -> int:
+        """자소서 저장 (같은 직무면 업데이트).
+
+        Args:
+            job_field: 직무 분야
+            content: 자소서 내용
+
+        Returns:
+            int: 저장된 레코드 ID
+        """
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 같은 직무의 기존 자소서가 있으면 업데이트
+        cursor = self.conn.execute(
+            'SELECT id FROM resumes WHERE job_field = ?', (job_field,)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            self.conn.execute(
+                'UPDATE resumes SET content = ?, updated_at = ? WHERE id = ?',
+                (content, now, existing[0])
+            )
+            self.conn.commit()
+            return existing[0]
+        else:
+            cursor = self.conn.execute(
+                'INSERT INTO resumes (job_field, content, created_at, updated_at) VALUES (?, ?, ?, ?)',
+                (job_field, content, now, now)
+            )
+            self.conn.commit()
+            return cursor.lastrowid
+
+    def get_resume(self, job_field: str) -> str | None:
+        """직무별 자소서 조회.
+
+        Args:
+            job_field: 직무 분야
+
+        Returns:
+            str | None: 자소서 내용 또는 None
+        """
+        cursor = self.conn.execute(
+            'SELECT content FROM resumes WHERE job_field = ? ORDER BY updated_at DESC LIMIT 1',
+            (job_field,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def get_all_resumes(self) -> list[dict]:
+        """모든 자소서 조회.
+
+        Returns:
+            list[dict]: 자소서 리스트
+        """
+        cursor = self.conn.execute('SELECT * FROM resumes ORDER BY updated_at DESC')
+        return [dict(row) for row in cursor.fetchall()]
+
+    # ─── 사용자 피드백 관련 메서드 ───
+
+    def save_user_feedback(self, rating: int, comment: str = "", feature_request: str = ""):
+        """사용자 피드백 저장.
+
+        Args:
+            rating: 만족도 (1~5)
+            comment: 자유 의견
+            feature_request: 기능 요청
+        """
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            'INSERT INTO user_feedback (date, rating, comment, feature_request) VALUES (?, ?, ?, ?)',
+            (now, rating, comment, feature_request)
+        )
+        self.conn.commit()
+
+    def get_all_feedback(self) -> list[dict]:
+        """모든 사용자 피드백 조회.
+
+        Returns:
+            list[dict]: 피드백 리스트
+        """
+        cursor = self.conn.execute('SELECT * FROM user_feedback ORDER BY date DESC')
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_feedback_stats(self) -> dict:
+        """피드백 통계 반환.
+
+        Returns:
+            dict: 총 피드백 수, 평균 만족도
+        """
+        cursor = self.conn.execute('SELECT COUNT(*), AVG(rating) FROM user_feedback')
+        row = cursor.fetchone()
+        return {
+            "total_feedback": row[0] or 0,
+            "avg_rating": round(row[1], 1) if row[1] else None,
+        }

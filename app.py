@@ -3,6 +3,7 @@
 
 import streamlit as st
 import os
+import re
 import random
 from datetime import date
 
@@ -12,6 +13,7 @@ from database import InterviewDB
 
 
 JOB_FIELDS = ["반도체", "백엔드", "데이터", "마케팅", "기타 (직접 입력)"]
+INTERVIEW_TYPES = ["직무면접", "인성면접", "자소서기반면접"]
 
 # 오늘의 명언 (취업 준비생을 위한 동기부여 명언 30+)
 DAILY_QUOTES = [
@@ -185,10 +187,14 @@ def init_session_state():
         "api_key": None,
         "current_question": None,
         "job_field": None,
+        "interview_type": "직무면접",
         "interview_active": False,
         "feedback": None,
         "question_count": 0,
         "show_records": False,
+        "show_resume": False,
+        "show_feedback_form": False,
+        "show_data_dashboard": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -232,19 +238,35 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
             else:
                 selected_job = None
 
+        # 면접 유형 선택
+        st.subheader("면접 유형")
+        selected_type = st.radio(
+            "면접 유형을 선택하세요",
+            INTERVIEW_TYPES,
+            index=0,
+            label_visibility="collapsed",
+            help="자소서기반면접: 자소서를 먼저 등록해야 합니다",
+        )
+
         st.divider()
         if st.button("면접 시작", use_container_width=True, type="primary"):
             if not config.is_configured():
                 st.error("API 키를 먼저 입력해주세요.")
             elif selected_job is None:
                 st.error("직무명을 입력해주세요.")
+            elif selected_type == "자소서기반면접" and not db.get_resume(selected_job):
+                st.error("자소서를 먼저 등록해주세요. 아래 '자소서 관리' 버튼을 눌러주세요.")
             else:
                 st.session_state["job_field"] = selected_job
+                st.session_state["interview_type"] = selected_type
                 st.session_state["interview_active"] = True
                 st.session_state["current_question"] = None
                 st.session_state["feedback"] = None
                 st.session_state["question_count"] = 0
                 st.session_state["show_records"] = False
+                st.session_state["show_resume"] = False
+                st.session_state["show_feedback_form"] = False
+                st.session_state["show_data_dashboard"] = False
                 st.rerun()
 
         if st.session_state.get("interview_active"):
@@ -255,19 +277,235 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.rerun()
 
         st.divider()
-        st.subheader("면접 기록")
-        record_count = db.get_record_count()
-        st.caption(f"총 {record_count}건 저장됨")
+        st.subheader("메뉴")
 
-        if st.button("기록 보기", use_container_width=True):
-            st.session_state["show_records"] = True
-            st.session_state["interview_active"] = False
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📄 자소서", use_container_width=True):
+                st.session_state["show_resume"] = True
+                st.session_state["show_records"] = False
+                st.session_state["show_feedback_form"] = False
+                st.session_state["show_data_dashboard"] = False
+                st.session_state["interview_active"] = False
+                st.rerun()
+        with col2:
+            if st.button("📋 기록", use_container_width=True):
+                st.session_state["show_records"] = True
+                st.session_state["show_resume"] = False
+                st.session_state["show_feedback_form"] = False
+                st.session_state["show_data_dashboard"] = False
+                st.session_state["interview_active"] = False
+                st.rerun()
+
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button("💬 피드백", use_container_width=True):
+                st.session_state["show_feedback_form"] = True
+                st.session_state["show_records"] = False
+                st.session_state["show_resume"] = False
+                st.session_state["show_data_dashboard"] = False
+                st.session_state["interview_active"] = False
+                st.rerun()
+        with col4:
+            if st.button("📊 대시보드", use_container_width=True):
+                st.session_state["show_data_dashboard"] = True
+                st.session_state["show_records"] = False
+                st.session_state["show_resume"] = False
+                st.session_state["show_feedback_form"] = False
+                st.session_state["interview_active"] = False
+                st.rerun()
+
+        st.divider()
+        record_count = db.get_record_count()
+        st.caption(f"총 {record_count}건 면접 기록 저장됨")
+
+
+def extract_score(feedback: str) -> int | None:
+    """AI 피드백 텍스트에서 논리성 점수를 추출."""
+    # "논리성 점수: 7/10" 또는 "논리성: 7/10" 패턴 매칭
+    patterns = [
+        r'논리성\s*점수\s*[:：]\s*(\d+)\s*/\s*10',
+        r'논리성\s*[:：]\s*(\d+)\s*/\s*10',
+        r'논리성.*?(\d+)\s*/\s*10',
+        r'(\d+)\s*/\s*10\s*점',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, feedback)
+        if match:
+            score = int(match.group(1))
+            if 1 <= score <= 10:
+                return score
+    return None
+
+
+def render_resume_page(db: InterviewDB):
+    """자소서 관리 페이지."""
+    st.subheader("📄 자소서 관리")
+    st.caption("자소서를 등록하면 자소서 기반 맞춤 면접 질문을 받을 수 있습니다.")
+
+    # 직무 선택
+    resume_job = st.selectbox(
+        "자소서 직무",
+        [j for j in JOB_FIELDS if j != "기타 (직접 입력)"],
+        key="resume_job_select",
+    )
+
+    # 기존 자소서 불러오기
+    existing_resume = db.get_resume(resume_job)
+
+    resume_text = st.text_area(
+        "자기소개서 내용",
+        value=existing_resume or "",
+        height=400,
+        placeholder="자기소개서 내용을 붙여넣기 해주세요...\n\n예시:\n[지원동기]\n저는 반도체 공정에 관심을 가지게 된 계기는...\n\n[성장과정]\n...\n\n[직무역량]\n...",
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("저장", use_container_width=True, type="primary"):
+            if resume_text and resume_text.strip():
+                db.save_resume(resume_job, resume_text.strip())
+                st.success(f"'{resume_job}' 직무 자소서가 저장되었습니다!")
+            else:
+                st.error("자소서 내용을 입력해주세요.")
+    with col2:
+        if st.button("홈으로", use_container_width=True):
+            st.session_state["show_resume"] = False
             st.rerun()
 
-        if st.session_state.get("show_records"):
-            if st.button("돌아가기", use_container_width=True):
-                st.session_state["show_records"] = False
-                st.rerun()
+    # 저장된 자소서 목록
+    all_resumes = db.get_all_resumes()
+    if all_resumes:
+        st.markdown("---")
+        st.markdown("**저장된 자소서 목록**")
+        for r in all_resumes:
+            with st.expander(f"[{r['job_field']}] 마지막 수정: {r['updated_at'][:10]}"):
+                st.text(r['content'][:500] + ("..." if len(r['content']) > 500 else ""))
+
+
+def render_feedback_form(db: InterviewDB):
+    """사용자 피드백 수집 페이지."""
+    st.subheader("💬 서비스 피드백")
+    st.caption("Go면접을 사용해주셔서 감사합니다. 더 나은 서비스를 위해 의견을 남겨주세요!")
+
+    with st.form("feedback_form"):
+        rating = st.slider("만족도", 1, 5, 3, help="1: 매우 불만족 ~ 5: 매우 만족")
+
+        st.markdown("⭐" * rating + "☆" * (5 - rating))
+
+        comment = st.text_area(
+            "사용 후기 / 개선 의견",
+            placeholder="어떤 점이 좋았나요? 어떤 점이 아쉬웠나요?",
+            height=100,
+        )
+
+        feature_request = st.text_area(
+            "추가되었으면 하는 기능",
+            placeholder="이런 기능이 있으면 좋겠어요...",
+            height=80,
+        )
+
+        submitted = st.form_submit_button("피드백 제출", type="primary", use_container_width=True)
+        if submitted:
+            db.save_user_feedback(rating, comment, feature_request)
+            st.success("피드백이 저장되었습니다! 소중한 의견 감사합니다. 🙏")
+
+    # 기존 피드백 통계
+    feedback_stats = db.get_feedback_stats()
+    if feedback_stats["total_feedback"] > 0:
+        st.markdown("---")
+        st.markdown("**피드백 현황**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("총 피드백 수", f"{feedback_stats['total_feedback']}건")
+        with col2:
+            avg = feedback_stats['avg_rating']
+            st.metric("평균 만족도", f"{'⭐' * round(avg)} ({avg}/5)")
+
+    if st.button("홈으로", use_container_width=True):
+        st.session_state["show_feedback_form"] = False
+        st.rerun()
+
+
+def render_data_dashboard(db: InterviewDB):
+    """데이터 대시보드 페이지."""
+    st.subheader("📊 데이터 대시보드")
+    st.caption("수집된 데이터 현황과 분석 결과를 확인하세요.")
+
+    stats = db.get_stats()
+
+    # 핵심 지표
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("총 면접 연습", f"{stats['total_interviews']}회")
+    with col2:
+        avg_score = stats['avg_score']
+        st.metric("평균 점수", f"{avg_score}/10" if avg_score else "-")
+    with col3:
+        st.metric("질문 뱅크", f"{stats['question_bank_size']}개")
+    with col4:
+        feedback_stats = db.get_feedback_stats()
+        st.metric("피드백 수", f"{feedback_stats['total_feedback']}건")
+
+    st.markdown("---")
+
+    # 직무별 분포
+    if stats["job_distribution"]:
+        st.markdown("**직무별 연습 현황**")
+        for field, count in stats["job_distribution"].items():
+            pct = count / stats["total_interviews"] if stats["total_interviews"] > 0 else 0
+            st.progress(pct, text=f"{field}: {count}회 ({pct*100:.0f}%)")
+
+    # 면접 유형별 분포
+    st.markdown("---")
+    st.markdown("**면접 유형별 현황**")
+    records = db.get_all_records()
+    type_counts = {}
+    for r in records:
+        t = r.get("interview_type", "직무면접")
+        type_counts[t] = type_counts.get(t, 0) + 1
+    if type_counts:
+        for t, count in type_counts.items():
+            st.write(f"- {t}: {count}회")
+    else:
+        st.info("아직 면접 기록이 없습니다.")
+
+    # 점수 추이
+    st.markdown("---")
+    st.markdown("**최근 점수 추이**")
+    scored_records = [r for r in records if r.get("score") is not None]
+    if scored_records:
+        # 최근 20개 (오래된 순)
+        recent = list(reversed(scored_records[:20]))
+        scores = [r["score"] for r in recent]
+        st.line_chart({"점수": scores})
+        if len(scores) >= 2:
+            trend = scores[-1] - scores[0]
+            if trend > 0:
+                st.success(f"📈 점수가 {trend}점 상승했습니다! 꾸준히 성장하고 있어요.")
+            elif trend < 0:
+                st.warning(f"📉 점수가 {abs(trend)}점 하락했습니다. 다시 집중해봐요!")
+            else:
+                st.info("📊 점수가 유지되고 있습니다.")
+    else:
+        st.info("점수 데이터가 아직 없습니다. 면접 연습을 시작해보세요!")
+
+    # 수집 데이터 요약
+    st.markdown("---")
+    st.markdown("**수집 데이터 요약**")
+    all_resumes = db.get_all_resumes()
+    st.markdown(f"""
+| 데이터 항목 | 수량 | 활용 방안 |
+|------------|------|----------|
+| 면접 기록 | {stats['total_interviews']}건 | 답변 품질 추적, 성장 분석 |
+| 질문 뱅크 | {stats['question_bank_size']}개 | 중복 방지, 질문 다양성 확보 |
+| 자소서 | {len(all_resumes)}건 | 맞춤 질문 생성 |
+| 사용자 피드백 | {feedback_stats['total_feedback']}건 | 서비스 개선 방향 도출 |
+""")
+
+    if st.button("홈으로", use_container_width=True):
+        st.session_state["show_data_dashboard"] = False
+        st.rerun()
 
 
 def render_daily_quote():
@@ -281,7 +519,10 @@ def render_daily_quote():
 
 def render_interview(config: ConfigManager, db: InterviewDB):
     job_field = st.session_state["job_field"]
-    st.subheader(f"{job_field} 직무 면접")
+    interview_type = st.session_state.get("interview_type", "직무면접")
+
+    type_emoji = {"직무면접": "💼", "인성면접": "🧠", "자소서기반면접": "📄"}
+    st.subheader(f"{type_emoji.get(interview_type, '🎯')} {job_field} - {interview_type}")
     st.caption(f"질문 #{st.session_state['question_count'] + 1}")
 
     if st.session_state["current_question"] is None:
@@ -303,7 +544,17 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                     common_list = "\n".join(f"- {q}" for q in sample)
                     context_hint += f"\n\n참고할 기출 질문 예시:\n{common_list}"
 
-                question = ai_client.generate_question(job_field, context_hint=context_hint)
+                # 자소서 기반이면 자소서 내용 가져오기
+                resume_content = ""
+                if interview_type == "자소서기반면접":
+                    resume_content = db.get_resume(job_field) or ""
+
+                question = ai_client.generate_question(
+                    job_field,
+                    context_hint=context_hint,
+                    interview_type=interview_type,
+                    resume_content=resume_content,
+                )
                 st.session_state["current_question"] = question
                 st.session_state["feedback"] = None
             except Exception as e:
@@ -335,7 +586,10 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                                 st.session_state["current_question"],
                                 user_answer.strip(),
                                 job_field,
+                                interview_type=interview_type,
                             )
+                            # 피드백에서 점수 추출
+                            score = extract_score(feedback)
                             st.session_state["feedback"] = feedback
                             st.session_state["last_answer"] = user_answer.strip()
                             st.session_state["question_count"] += 1
@@ -344,6 +598,8 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                                 question=st.session_state["current_question"],
                                 answer=user_answer.strip(),
                                 feedback=feedback,
+                                score=score,
+                                interview_type=interview_type,
                             )
                             st.rerun()
                         except Exception as e:
@@ -434,9 +690,15 @@ def render_records(db: InterviewDB):
 
     st.caption(f"{len(records)}건의 기록")
     for record in records:
-        with st.expander(f"[{record['job_field']}] {record['question'][:50]}... ({record['date'][:10]})"):
+        interview_type = record.get('interview_type', '직무면접')
+        type_emoji = {"직무면접": "💼", "인성면접": "🧠", "자소서기반면접": "📄"}
+        emoji = type_emoji.get(interview_type, "🎯")
+        with st.expander(f"{emoji} [{record['job_field']}] {record['question'][:50]}... ({record['date'][:10]})"):
             st.markdown(f"**날짜:** {record['date']}")
             st.markdown(f"**직무:** {record['job_field']}")
+            st.markdown(f"**면접 유형:** {interview_type}")
+            if record.get('score'):
+                st.markdown(f"**점수:** {record['score']}/10")
             st.markdown(f"**질문:** {record['question']}")
             st.markdown("---")
             st.markdown("**내 답변:**")
@@ -496,7 +758,13 @@ def main():
 
     render_sidebar(config, db)
 
-    if st.session_state.get("show_records"):
+    if st.session_state.get("show_data_dashboard"):
+        render_data_dashboard(db)
+    elif st.session_state.get("show_feedback_form"):
+        render_feedback_form(db)
+    elif st.session_state.get("show_resume"):
+        render_resume_page(db)
+    elif st.session_state.get("show_records"):
         render_records(db)
     elif st.session_state.get("interview_active"):
         render_interview(config, db)
