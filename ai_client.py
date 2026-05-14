@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """AI 클라이언트 모듈.
 
 Google Gemini API를 기본으로 사용하고, 실패 시 Groq API로 자동 전환한다.

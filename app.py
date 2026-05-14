@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""GoFactory 면접 연습 챗봇 메인 애플리케이션."""
+﻿# -*- coding: utf-8 -*-
+"""Go면접 면접 연습 챗봇 메인 애플리케이션."""
 
 import streamlit as st
 import os
@@ -452,7 +452,7 @@ def render_home(config: ConfigManager, db: InterviewDB):
     render_daily_quote()
 
     st.markdown("""
-**GoFactory 면접 연습**은 AI 면접관과 함께 실전 면접을 연습할 수 있는 서비스입니다.
+**Go면접 면접 연습**은 AI 면접관과 함께 실전 면접을 연습할 수 있는 서비스입니다.
 
 **사용 방법:**
 1. 사이드바에서 직무를 선택하세요
@@ -476,7 +476,7 @@ def render_home(config: ConfigManager, db: InterviewDB):
 
 
 def main():
-    st.set_page_config(page_title="GoFactory 면접 연습", page_icon="🎯", layout="centered")
+    st.set_page_config(page_title="Go면접 면접 연습", page_icon="🎯", layout="centered")
 
     # 커스텀 CSS 적용
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -488,7 +488,7 @@ def main():
     # 헤더 배너
     st.markdown(
         '<div class="header-banner">'
-        '<h1>GoFactory 면접 연습</h1>'
+        '<h1>Go면접 면접 연습</h1>'
         '<p>AI 면접관과 함께하는 실전 면접 연습</p>'
         '</div>',
         unsafe_allow_html=True,
