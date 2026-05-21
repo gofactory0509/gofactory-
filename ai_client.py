@@ -77,11 +77,16 @@ class AIClient:
 
         raise RuntimeError("사용 가능한 AI 모델이 없습니다. API 키를 확인해주세요.")
 
-    def generate_question(self, job_field: str, context_hint: str = "", interview_type: str = "직무면접", resume_content: str = "") -> str:
+    def generate_question(self, job_field: str, context_hint: str = "", interview_type: str = "직무면접", resume_content: str = "", company: str = "") -> str:
+        company_context = ""
+        if company:
+            company_context = f"지원 회사는 '{company}'이야. 이 회사의 인재상, 직무 특성, 최신 동향을 반영한 질문을 만들어줘. "
+
         if interview_type == "자소서기반면접" and resume_content:
             prompt = (
                 f"아래는 '{job_field}' 직무에 지원한 지원자의 자기소개서야:\n\n"
                 f"---\n{resume_content}\n---\n\n"
+                f"{company_context}"
                 f"이 자기소개서 내용을 바탕으로 면접관이 물어볼 수 있는 "
                 f"날카롭고 구체적인 면접 질문을 하나만 생성해줘. "
                 f"자소서에 적힌 경험, 역량, 지원동기 등을 파고드는 질문이어야 해. "
@@ -90,6 +95,7 @@ class AIClient:
         elif interview_type == "인성면접":
             prompt = (
                 f"'{job_field}' 직무 면접에서 나올 수 있는 인성 면접 질문을 하나만 생성해줘. "
+                f"{company_context}"
                 f"지원자의 가치관, 팀워크, 갈등 해결, 리더십, 스트레스 관리, 실패 경험 등 "
                 f"인성/역량을 평가하는 질문이어야 해. "
                 f"질문만 간결하게 출력해."
@@ -97,14 +103,16 @@ class AIClient:
         else:
             prompt = (
                 f"'{job_field}' 직무 면접에서 나올 수 있는 실전 면접 질문을 하나만 생성해줘. "
+                f"{company_context}"
                 f"직무 전문 지식이나 기술적 역량을 평가하는 질문이어야 해. "
+                f"해당 직무의 최신 트렌드와 현장 실무를 반영한 질문이면 좋겠어. "
                 f"질문만 간결하게 출력해. 번호나 부가 설명 없이 질문 하나만."
             )
         if context_hint:
             prompt += context_hint
         return self._call(prompt)
 
-    def evaluate_answer(self, question: str, answer: str, job_field: str, interview_type: str = "직무면접") -> str:
+    def evaluate_answer(self, question: str, answer: str, job_field: str, interview_type: str = "직무면접", company: str = "") -> str:
         type_guidance = ""
         if interview_type == "인성면접":
             type_guidance = (
@@ -117,19 +125,34 @@ class AIClient:
                 "자소서 내용과의 일관성, 구체적 사례 제시, 깊이 있는 답변인지를 중심으로 평가해줘.\n"
             )
 
+        company_context = ""
+        if company:
+            company_context = f"지원 회사: {company}\n이 회사의 인재상과 직무 특성을 고려하여 평가해줘.\n"
+
         prompt = (
             f"직무: {job_field}\n"
             f"면접 유형: {interview_type}\n"
+            f"{company_context}"
             f"면접 질문: {question}\n"
             f"지원자 답변: {answer}\n\n"
             f"{type_guidance}"
-            f"위 답변을 다음 기준으로 평가해줘:\n"
-            f"1. **논리성** (1~10점): 답변의 논리적 구조와 일관성\n"
-            f"2. **핵심 키워드**: 답변에 포함된/빠진 중요 키워드 분석\n"
-            f"3. **개선점**: 구체적인 개선 방향과 모범 답변 예시\n"
-            f"4. **총평**: 전체적인 한줄 평가\n\n"
-            f"반드시 첫 줄에 '논리성 점수: X/10' 형식으로 점수를 명시해줘.\n"
-            f"친절하지만 전문적인 톤으로 피드백해줘."
+            f"위 답변을 아래 5개 항목으로 평가해줘. 각 항목은 20점 만점이야:\n\n"
+            f"1. **논리성** (X/20): 두괄식 구성인지, 결론→근거→예시 순서로 답변했는지 평가. "
+            f"미괄식이거나 결론이 뒤에 나오면 감점. 답변의 논리적 흐름과 구조를 평가해.\n"
+            f"2. **직무 적합성** (X/20): 해당 직무에서 요구하는 핵심 역량과 키워드가 포함되었는지, "
+            f"현장 실무와 최신 트렌드를 반영했는지 평가. 틀린 정보나 구시대적 내용이 있으면 반드시 지적해.\n"
+            f"3. **구체성** (X/20): 추상적 답변이 아닌 구체적 수치, 사례, 경험이 포함되었는지 평가. "
+            f"'열심히 했다' 같은 모호한 표현은 감점.\n"
+            f"4. **표현력** (X/20): 간결하고 명확한 표현인지, 불필요한 반복이나 장황한 설명은 없는지 평가. "
+            f"면접관이 듣기 편한 답변인지 평가해.\n"
+            f"5. **차별성** (X/20): 다른 지원자와 차별화되는 나만의 강점이나 관점이 드러나는지 평가.\n\n"
+            f"반드시 아래 형식으로 점수를 출력해줘:\n"
+            f"[점수] 논리성: X/20 | 직무적합성: X/20 | 구체성: X/20 | 표현력: X/20 | 차별성: X/20 | 총점: XX/100\n\n"
+            f"각 항목별로 구체적인 개선점과 모범 답변 예시를 제시해줘. "
+            f"특히 두괄식 구성이 안 되어 있으면 두괄식으로 재구성한 예시를 보여줘. "
+            f"직무 관련 최신 트렌드나 팩트가 틀렸으면 정확한 정보를 알려줘. "
+            f"항목마다 다른 개선 포인트를 제시해야 해 (같은 피드백 반복 금지). "
+            f"마지막에 총평 한줄을 작성해줘."
         )
         return self._call(prompt)
 

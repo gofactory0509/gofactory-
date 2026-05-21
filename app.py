@@ -188,6 +188,7 @@ def init_session_state():
         "current_question": None,
         "job_field": None,
         "interview_type": "직무면접",
+        "company": "",
         "interview_active": False,
         "feedback": None,
         "question_count": 0,
@@ -248,6 +249,16 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
             help="자소서기반면접: 자소서를 먼저 등록해야 합니다",
         )
 
+        # 회사 입력
+        st.subheader("지원 회사 (선택)")
+        company_input = st.text_input(
+            "회사명",
+            placeholder="예: 삼성전자, 네이버, SK하이닉스...",
+            label_visibility="collapsed",
+            help="회사를 입력하면 해당 기업 맞춤 질문이 생성됩니다",
+        )
+        selected_company = company_input.strip() if company_input else ""
+
         st.divider()
         if st.button("면접 시작", use_container_width=True, type="primary"):
             if not config.is_configured():
@@ -259,6 +270,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
             else:
                 st.session_state["job_field"] = selected_job
                 st.session_state["interview_type"] = selected_type
+                st.session_state["company"] = selected_company
                 st.session_state["interview_active"] = True
                 st.session_state["current_question"] = None
                 st.session_state["feedback"] = None
@@ -321,21 +333,37 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
 
 
 def extract_score(feedback: str) -> int | None:
-    """AI 피드백 텍스트에서 논리성 점수를 추출."""
-    # "논리성 점수: 7/10" 또는 "논리성: 7/10" 패턴 매칭
+    """AI 피드백 텍스트에서 총점(100점 만점)을 추출."""
+    # "[점수] ... 총점: 75/100" 패턴 매칭
     patterns = [
-        r'논리성\s*점수\s*[:：]\s*(\d+)\s*/\s*10',
-        r'논리성\s*[:：]\s*(\d+)\s*/\s*10',
-        r'논리성.*?(\d+)\s*/\s*10',
-        r'(\d+)\s*/\s*10\s*점',
+        r'총점\s*[:：]\s*(\d+)\s*/\s*100',
+        r'총점\s*(\d+)\s*/\s*100',
+        r'(\d+)\s*/\s*100',
     ]
     for pattern in patterns:
         match = re.search(pattern, feedback)
         if match:
             score = int(match.group(1))
-            if 1 <= score <= 10:
+            if 0 <= score <= 100:
                 return score
     return None
+
+
+def extract_detail_scores(feedback: str) -> dict:
+    """AI 피드백에서 항목별 점수를 추출."""
+    scores = {}
+    patterns = {
+        "논리성": r'논리성\s*[:：]\s*(\d+)\s*/\s*20',
+        "직무적합성": r'직무\s*적합성\s*[:：]\s*(\d+)\s*/\s*20',
+        "구체성": r'구체성\s*[:：]\s*(\d+)\s*/\s*20',
+        "표현력": r'표현력\s*[:：]\s*(\d+)\s*/\s*20',
+        "차별성": r'차별성\s*[:：]\s*(\d+)\s*/\s*20',
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, feedback)
+        if match:
+            scores[key] = int(match.group(1))
+    return scores
 
 
 def render_resume_page(db: InterviewDB):
@@ -440,7 +468,7 @@ def render_data_dashboard(db: InterviewDB):
         st.metric("총 면접 연습", f"{stats['total_interviews']}회")
     with col2:
         avg_score = stats['avg_score']
-        st.metric("평균 점수", f"{avg_score}/10" if avg_score else "-")
+        st.metric("평균 점수", f"{avg_score}/100" if avg_score else "-")
     with col3:
         st.metric("질문 뱅크", f"{stats['question_bank_size']}개")
     with col4:
@@ -520,9 +548,13 @@ def render_daily_quote():
 def render_interview(config: ConfigManager, db: InterviewDB):
     job_field = st.session_state["job_field"]
     interview_type = st.session_state.get("interview_type", "직무면접")
+    company = st.session_state.get("company", "")
 
     type_emoji = {"직무면접": "💼", "인성면접": "🧠", "자소서기반면접": "📄"}
-    st.subheader(f"{type_emoji.get(interview_type, '🎯')} {job_field} - {interview_type}")
+    header_text = f"{type_emoji.get(interview_type, '🎯')} {job_field} - {interview_type}"
+    if company:
+        header_text += f" ({company})"
+    st.subheader(header_text)
     st.caption(f"질문 #{st.session_state['question_count'] + 1}")
 
     if st.session_state["current_question"] is None:
@@ -554,6 +586,7 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                     context_hint=context_hint,
                     interview_type=interview_type,
                     resume_content=resume_content,
+                    company=company,
                 )
                 st.session_state["current_question"] = question
                 st.session_state["feedback"] = None
@@ -587,6 +620,7 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                                 user_answer.strip(),
                                 job_field,
                                 interview_type=interview_type,
+                                company=company,
                             )
                             # 피드백에서 점수 추출
                             score = extract_score(feedback)
@@ -609,9 +643,27 @@ def render_interview(config: ConfigManager, db: InterviewDB):
         st.markdown("**내 답변**")
         st.markdown(st.session_state.get("last_answer", ""))
 
+        # 점수 시각화
+        feedback_text = st.session_state["feedback"]
+        detail_scores = extract_detail_scores(feedback_text)
+        total_score = extract_score(feedback_text)
+
+        if detail_scores:
+            st.markdown("---")
+            st.markdown("**📊 항목별 점수**")
+            score_cols = st.columns(5)
+            score_labels = ["논리성", "직무적합성", "구체성", "표현력", "차별성"]
+            for i, label in enumerate(score_labels):
+                with score_cols[i]:
+                    s = detail_scores.get(label, 0)
+                    st.metric(label, f"{s}/20")
+
+            if total_score is not None:
+                st.markdown(f"### 총점: {total_score}/100점")
+
         # 피드백 카드
         st.markdown(
-            f'<div class="feedback-card"><h4>AI 피드백</h4>{st.session_state["feedback"]}</div>',
+            f'<div class="feedback-card"><h4>AI 피드백</h4>{feedback_text}</div>',
             unsafe_allow_html=True,
         )
 
@@ -698,7 +750,7 @@ def render_records(db: InterviewDB):
             st.markdown(f"**직무:** {record['job_field']}")
             st.markdown(f"**면접 유형:** {interview_type}")
             if record.get('score'):
-                st.markdown(f"**점수:** {record['score']}/10")
+                st.markdown(f"**점수:** {record['score']}/100")
             st.markdown(f"**질문:** {record['question']}")
             st.markdown("---")
             st.markdown("**내 답변:**")
