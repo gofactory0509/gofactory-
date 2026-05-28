@@ -104,6 +104,68 @@ JOB_BUSINESS_UNITS = {
 **의존성**: `streamlit-mic-recorder` (requirements.txt 추가)
 **키 정책**: 기존 Gemini 키 재사용 (BYOK 통합 시 자동 적용)
 
+### 2-3. 🧭 LLM 라우터 (Bedrock 기본 + OpenRouter BYOK)
+
+**서비스 자체는 AWS Bedrock(Claude Sonnet 4.6)으로 동작**하고, 사용자가 OpenRouter API 키를 입력하면 그 키로 자동 라우팅. 사용자 입장에서 "결제하지 않아도 면접 가능"이고, OpenRouter 키 입력 시 GPT-4o/Claude/Gemini 등을 자기 모델로 사용 가능.
+
+**구조 (신규 파일 3개)**:
+
+| 파일 | 역할 |
+|---|---|
+| `backend/services/bedrock_client.py` | AWS Bedrock 호출 (EC2 IAM Role 자동 인증) |
+| `backend/services/openrouter_client.py` | OpenRouter 호출 (사용자 BYOK 키 사용) |
+| `backend/services/llm_router.py` | 사용자 키 유무에 따라 자동 선택 + 기존 AIService 동등 인터페이스 |
+
+**라우팅 규칙**:
+
+```
+요청 들어옴
+   ↓
+LLMRouter(user_openrouter_key=...)
+   ↓
+키 있음? ──Yes──→ OpenRouterClient (사용자 비용)
+   │                  ↳ GPT-4o / Claude / Gemini / 사용자 선택 모델
+   └─No──→ BedrockClient (서비스 비용)
+              ↳ Claude Sonnet 4.6 기본 (us-east-1)
+```
+
+**환경 변수 (`.env`)**:
+
+```bash
+AWS_REGION=us-east-1
+BEDROCK_MODEL_ID=anthropic.claude-sonnet-4-6-20251015-v1:0
+```
+
+EC2에서는 IAM Role을 통해 자동 인증되므로 ACCESS_KEY 불필요.
+
+**라우터 측 통합 가이드**: 기존 `backend/services/ai_client.AIService` 를 사용하는 라우터에서 다음과 같이 점진 교체:
+
+```python
+# 기존
+from backend.services.ai_client import AIService
+service = AIService()
+
+# 신규 (BYOK 헤더에서 키 추출)
+from backend.services.llm_router import LLMRouter
+
+@router.post("/api/interview/start")
+def start_interview(req: Request, ...):
+    user_key = req.headers.get("X-OpenRouter-Key")
+    user_model = req.headers.get("X-LLM-Model")
+    service = LLMRouter(user_openrouter_key=user_key, user_model=user_model)
+    question = service.generate_question(...)
+```
+
+**EC2 배포**: [DEPLOYMENT.md](DEPLOYMENT.md) 참고 — Bedrock 모델 access·IAM Role·systemd 셋업 단계별 가이드.
+
+**비용 (Bedrock 기준, 면접 1회 ≈ 3K input + 1K output)**:
+
+| 모델 | 면접 1회 | $100 크레딧 | 비고 |
+|---|---|---|---|
+| **Sonnet 4.6** (기본) | ~$0.024 | ~4,000회 | AWS 학생 크레딧 활용 |
+| **Haiku 4.5** | ~$0.006 | ~16,000회 | quality/cost 균형 |
+| **OpenRouter** | 사용자 비용 | - | 모델 자유 선택 |
+
 ---
 
 ## 3. BYOK · 프론트엔드 통합 포인트 (다른 트랙)
