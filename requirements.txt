@@ -1,4 +1,19 @@
-streamlit
-google-generativeai
-openai
-python-dotenv
+# ===========================================
+# Go면접 FastAPI 서버 - Python Dependencies
+# ===========================================
+# Install: pip install -r requirements.txt
+
+# --- FastAPI Backend ---
+fastapi==0.135.3
+uvicorn[standard]==0.44.0
+pydantic-settings==2.6.1
+python-dotenv==0.21.0
+
+# --- AI Providers ---
+google-generativeai==0.8.6
+openai==2.37.0
+
+# --- Testing ---
+pytest==7.4.4
+httpx==0.27.0
+hypothesis==6.152.9
