@@ -280,6 +280,40 @@
     color: #e2e8f0;
   }
 
+  /* Tailwind 기본 요소 다크모드 */
+  input, textarea, select {
+    background-color: #2d3748;
+    color: #e2e8f0;
+    border-color: #4a5568;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: #718096;
+  }
+
+  /* 직무 선택 버튼 (interview.js에서 생성) */
+  .job-field-btn {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #e2e8f0;
+  }
+
+  .job-field-btn:hover {
+    border-color: #667eea;
+    color: #a3bffa;
+  }
+
+  /* 흰 배경 카드들 다크모드 */
+  .bg-white {
+    background-color: #2d3748 !important;
+    border-color: #4a5568 !important;
+    color: #e2e8f0;
+  }
+
+  h2, h3, label {
+    color: #e2e8f0;
+  }
+
   /* Navigation */
   .nav-btn {
     background: #2d3748;
