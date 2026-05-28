@@ -1,11 +1,23 @@
 ﻿# -*- coding: utf-8 -*-
-"""Go면접 챗봇 메인 애플리케이션."""
+"""Go터뷰 챗봇 메인 애플리케이션."""
 
+import base64
 import streamlit as st
 import os
 import re
 import random
 from datetime import date
+from pathlib import Path
+
+
+LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
+
+
+def _logo_data_uri() -> str | None:
+    """로고 이미지를 data: URI로 반환. 파일 없으면 None."""
+    if not LOGO_PATH.exists():
+        return None
+    return "data:image/png;base64," + base64.b64encode(LOGO_PATH.read_bytes()).decode()
 
 import pandas as pd
 
@@ -58,30 +70,65 @@ DAILY_QUOTES = [
 
 CUSTOM_CSS = """
 <style>
-    /* 전체 배경 및 폰트 */
+    /* OS 다크모드와 무관하게 light 스킴 잠금 */
+    :root { color-scheme: light; }
     .stApp {
         background: linear-gradient(180deg, #f8f9fc 0%, #ffffff 100%);
+        color-scheme: light;
+    }
+
+    /* 다크모드에서 흰 텍스트가 흰 배경에 묻히는 문제 방지 — 텍스트 색상 명시 */
+    .stApp, .stApp p, .stApp span, .stApp div,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp label, .stApp .stMarkdown { color: #2d3748; }
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div, section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] h4,
+    section[data-testid="stSidebar"] .stMarkdown { color: #2d3748; }
+    /* st.caption 등 회색 텍스트 */
+    .stApp small, section[data-testid="stSidebar"] small { color: #718096; }
+    /* 입력 박스 — 다크모드에서 검정 배경 되는 것 방지 */
+    .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        color: #2d3748 !important;
     }
 
     /* 헤더 배너 */
     .header-banner {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem 2rem;
-        border-radius: 12px;
+        padding: 1.4rem 1.8rem;
+        border-radius: 14px;
         margin-bottom: 1.5rem;
         color: white;
+        display: flex;
+        align-items: center;
+        gap: 1.1rem;
+        box-shadow: 0 4px 12px rgba(102,126,234,0.18);
     }
+    .header-banner .header-logo {
+        height: 64px;
+        width: 64px;
+        object-fit: contain;
+        background: white;
+        border-radius: 14px;
+        padding: 6px;
+        flex-shrink: 0;
+    }
+    .header-banner .header-text { flex: 1; }
     .header-banner h1 {
         margin: 0;
-        font-size: 1.6rem;
+        font-size: 1.7rem;
         font-weight: 700;
-        color: white;
+        color: white !important;
+        letter-spacing: -0.02em;
     }
     .header-banner p {
         margin: 0.3rem 0 0 0;
-        font-size: 0.9rem;
-        opacity: 0.9;
-        color: #e8e8ff;
+        font-size: 0.92rem;
+        opacity: 0.92;
+        color: #e8e8ff !important;
     }
 
     /* 명언 카드 */
@@ -462,7 +509,7 @@ def render_resume_page(db: InterviewDB):
 def render_feedback_form(db: InterviewDB):
     """사용자 피드백 수집 페이지."""
     st.subheader("💬 서비스 피드백")
-    st.caption("Go면접을 사용해주셔서 감사합니다. 더 나은 서비스를 위해 의견을 남겨주세요!")
+    st.caption("Go터뷰를 사용해주셔서 감사합니다. 더 나은 서비스를 위해 의견을 남겨주세요!")
 
     with st.form("feedback_form"):
         rating = st.slider("만족도", 1, 5, 3, help="1: 매우 불만족 ~ 5: 매우 만족")
@@ -958,7 +1005,7 @@ def render_home(config: ConfigManager, db: InterviewDB):
     render_daily_quote()
 
     st.markdown("""
-**Go면접**은 AI 면접관과 함께 실전 면접을 연습할 수 있는 서비스입니다.
+**Go터뷰**는 AI 면접관과 함께 실전 면접을 연습할 수 있는 서비스입니다.
 
 **사용 방법:**
 1. 사이드바에서 직무를 선택하세요
@@ -982,7 +1029,12 @@ def render_home(config: ConfigManager, db: InterviewDB):
 
 
 def main():
-    st.set_page_config(page_title="Go면접", page_icon="🎯", layout="centered")
+    logo_uri = _logo_data_uri()
+    st.set_page_config(
+        page_title="Go터뷰",
+        page_icon=str(LOGO_PATH) if LOGO_PATH.exists() else "🎯",
+        layout="centered",
+    )
 
     # 커스텀 CSS 적용
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -991,12 +1043,16 @@ def main():
     config = ConfigManager(st.session_state)
     db = InterviewDB()
 
-    # 헤더 배너
+    # 헤더 배너 (로고 + 워드마크 + 부제)
+    logo_html = f'<img src="{logo_uri}" class="header-logo" alt="Go터뷰 로고" />' if logo_uri else ''
     st.markdown(
-        '<div class="header-banner">'
-        '<h1>Go면접</h1>'
-        '<p>AI 면접관과 함께하는 실전 면접 연습</p>'
-        '</div>',
+        f'<div class="header-banner">'
+        f'{logo_html}'
+        f'<div class="header-text">'
+        f'<h1>Go터뷰</h1>'
+        f'<p>AI 면접 연습 파트너</p>'
+        f'</div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 

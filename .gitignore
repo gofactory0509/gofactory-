@@ -1,4 +1,7 @@
 .env
 __pycache__/
 *.pyc
-.streamlit/
+
+# Streamlit: config.toml은 추적(테마 강제), 자격증명만 ignore
+.streamlit/credentials.toml
+.streamlit/secrets.toml
