@@ -1,0 +1,30 @@
+========================================
+  Go면접 - 실행 가이드
+========================================
+
+1. Python 설치 (3.10 이상)
+   https://www.python.org/downloads/
+
+2. 패키지 설치
+   pip install -r requirements.txt
+
+3. 실행
+   streamlit run app.py
+
+4. 브라우저에서 http://localhost:8501 접속
+
+5. API 키
+   - 사이드바에서 Gemini API 키 입력
+   - 키 발급: https://aistudio.google.com/apikey
+   - 또는 .env 파일 만들어서:
+     GEMINI_API_KEY=여기에키입력
+
+========================================
+  배포 URL (바로 사용 가능)
+========================================
+https://gofactory.streamlit.app
+
+========================================
+  GitHub
+========================================
+https://github.com/gofactory0509/gofactory-
