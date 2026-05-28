@@ -8,12 +8,18 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/css/style.css">
 </head>
-<body class="bg-gradient-to-b from-gray-50 to-white min-h-screen">
+<body class="bg-gradient-to-b from-gray-50 to-white min-h-screen text-gray-900">
+    <script>tailwind.config = { darkMode: 'media' }</script>
+
     <!-- Header Banner -->
-    <header class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-6 rounded-xl mx-4 mt-4 shadow-lg">
-        <h1 class="text-2xl font-bold">Go면접 면접 연습</h1>
-        <p class="text-indigo-100 text-sm mt-1">AI 면접관과 함께하는 실전 면접 연습</p>
-    </header>
+<header class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-6 rounded-xl mx-4 mt-4 shadow-lg flex items-center gap-4">
+    <img src="/assets/logo.png" alt="Go터뷰 로고" class="w-14 h-14 rounded-lg bg-white/20 p-1">
+    <div>
+        <h1 class="text-2xl font-bold">Go터뷰</h1>
+        <p class="text-indigo-100 text-sm mt-1">AI 면접 연습 파트너</p>
+    </div>
+</header>
+
 
     <!-- Navigation -->
     <nav class="flex gap-2 mx-4 mt-4">
