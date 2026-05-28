@@ -7,12 +7,15 @@ import re
 import random
 from datetime import date
 
-from ai_client import AIClient
+import pandas as pd
+
+from ai_client import AIClient, parse_detail_scores
 from config import ConfigManager
-from database import InterviewDB
+from database import InterviewDB, JOB_BUSINESS_UNITS, JOB_DESCRIPTIONS
 
 
-JOB_FIELDS = ["반도체", "백엔드", "데이터", "마케팅", "기타 (직접 입력)"]
+# 삼성전자 DS부문 '26상 공채 직무기술서 기준 10개 직무
+JOB_FIELDS = list(JOB_BUSINESS_UNITS.keys())
 INTERVIEW_TYPES = ["직무면접", "인성면접", "자소서기반면접"]
 
 # 오늘의 명언 (취업 준비생을 위한 동기부여 명언 30+)
@@ -187,6 +190,7 @@ def init_session_state():
         "api_key": None,
         "current_question": None,
         "job_field": None,
+        "business_unit": None,
         "interview_type": "직무면접",
         "company": "",
         "interview_active": False,
@@ -196,6 +200,7 @@ def init_session_state():
         "show_resume": False,
         "show_feedback_form": False,
         "show_data_dashboard": False,
+        "show_weakness_page": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -230,14 +235,27 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
             JOB_FIELDS,
             index=0,
             label_visibility="collapsed",
+            help="삼성전자 DS부문 '26상 공채 직무기술서 기준",
         )
+        if selected_job and JOB_DESCRIPTIONS.get(selected_job):
+            st.caption(JOB_DESCRIPTIONS[selected_job])
 
-        if selected_job == "기타 (직접 입력)":
-            custom_job = st.text_input("직무명 입력", placeholder="예: 프론트엔드, AI/ML...")
-            if custom_job and custom_job.strip():
-                selected_job = custom_job.strip()
+        # 사업부 선택 (해당 직무가 모집되는 사업부 중에서)
+        available_units = JOB_BUSINESS_UNITS.get(selected_job, [])
+        selected_business_unit = None
+        if available_units:
+            st.subheader("사업부 선택")
+            if len(available_units) == 1:
+                selected_business_unit = available_units[0]
+                st.caption(f"이 직무는 **{selected_business_unit}** 에서 모집됩니다")
             else:
-                selected_job = None
+                selected_business_unit = st.radio(
+                    "면접 대상 사업부",
+                    available_units,
+                    index=0,
+                    label_visibility="collapsed",
+                    help="같은 직무라도 사업부에 따라 세부 업무가 다릅니다",
+                )
 
         # 면접 유형 선택
         st.subheader("면접 유형")
@@ -249,15 +267,36 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
             help="자소서기반면접: 자소서를 먼저 등록해야 합니다",
         )
 
-        # 회사 입력
+        # 회사 선택 (선택사항)
         st.subheader("지원 회사 (선택)")
-        company_input = st.text_input(
+        cached_companies = db.list_cached_companies()
+        cached_names = [c["name"] for c in cached_companies]
+        company_options = ["(선택 안 함)"] + cached_names + ["기타 (직접 입력)"]
+        company_choice = st.selectbox(
             "회사명",
-            placeholder="예: 삼성전자, 네이버, SK하이닉스...",
+            company_options,
+            index=0,
             label_visibility="collapsed",
-            help="회사를 입력하면 해당 기업 맞춤 질문이 생성됩니다",
+            help=(
+                "캐시 회사를 선택하면 인재상·주력사업·최신트렌드가 면접에 자동 반영됩니다. "
+                "드롭다운에서 타이핑하면 검색됩니다."
+            ),
         )
-        selected_company = company_input.strip() if company_input else ""
+        selected_company = ""
+        if company_choice == "기타 (직접 입력)":
+            custom = st.text_input(
+                "회사명 직접 입력",
+                placeholder="예: LG이노텍, 네이버, 키엔스...",
+                label_visibility="visible",
+            )
+            selected_company = custom.strip() if custom else ""
+            if selected_company:
+                st.caption("ℹ️ 캐시에 없는 회사 (LLM 일반 지식으로 면접 진행)")
+        elif company_choice != "(선택 안 함)":
+            selected_company = company_choice
+            _preview = db.get_company_info(selected_company)
+            if _preview:
+                st.caption(f"📚 캐시 적중 — {_preview['industry']}")
 
         st.divider()
         if st.button("면접 시작", use_container_width=True, type="primary"):
@@ -269,6 +308,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.error("자소서를 먼저 등록해주세요. 아래 '자소서 관리' 버튼을 눌러주세요.")
             else:
                 st.session_state["job_field"] = selected_job
+                st.session_state["business_unit"] = selected_business_unit
                 st.session_state["interview_type"] = selected_type
                 st.session_state["company"] = selected_company
                 st.session_state["interview_active"] = True
@@ -279,6 +319,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.session_state["show_resume"] = False
                 st.session_state["show_feedback_form"] = False
                 st.session_state["show_data_dashboard"] = False
+                st.session_state["show_weakness_page"] = False
                 st.rerun()
 
         if st.session_state.get("interview_active"):
@@ -286,6 +327,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.session_state["interview_active"] = False
                 st.session_state["current_question"] = None
                 st.session_state["feedback"] = None
+                st.session_state.pop("weakness_target", None)
                 st.rerun()
 
         st.divider()
@@ -298,6 +340,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.session_state["show_records"] = False
                 st.session_state["show_feedback_form"] = False
                 st.session_state["show_data_dashboard"] = False
+                st.session_state["show_weakness_page"] = False
                 st.session_state["interview_active"] = False
                 st.rerun()
         with col2:
@@ -306,6 +349,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.session_state["show_resume"] = False
                 st.session_state["show_feedback_form"] = False
                 st.session_state["show_data_dashboard"] = False
+                st.session_state["show_weakness_page"] = False
                 st.session_state["interview_active"] = False
                 st.rerun()
 
@@ -316,6 +360,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.session_state["show_records"] = False
                 st.session_state["show_resume"] = False
                 st.session_state["show_data_dashboard"] = False
+                st.session_state["show_weakness_page"] = False
                 st.session_state["interview_active"] = False
                 st.rerun()
         with col4:
@@ -324,8 +369,18 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
                 st.session_state["show_records"] = False
                 st.session_state["show_resume"] = False
                 st.session_state["show_feedback_form"] = False
+                st.session_state["show_weakness_page"] = False
                 st.session_state["interview_active"] = False
                 st.rerun()
+
+        if st.button("🎯 약점 집중 연습", use_container_width=True):
+            st.session_state["show_weakness_page"] = True
+            st.session_state["show_data_dashboard"] = False
+            st.session_state["show_records"] = False
+            st.session_state["show_resume"] = False
+            st.session_state["show_feedback_form"] = False
+            st.session_state["interview_active"] = False
+            st.rerun()
 
         st.divider()
         record_count = db.get_record_count()
@@ -350,20 +405,13 @@ def extract_score(feedback: str) -> int | None:
 
 
 def extract_detail_scores(feedback: str) -> dict:
-    """AI 피드백에서 항목별 점수를 추출."""
-    scores = {}
-    patterns = {
-        "논리성": r'논리성\s*[:：]\s*(\d+)\s*/\s*20',
-        "직무적합성": r'직무\s*적합성\s*[:：]\s*(\d+)\s*/\s*20',
-        "구체성": r'구체성\s*[:：]\s*(\d+)\s*/\s*20',
-        "표현력": r'표현력\s*[:：]\s*(\d+)\s*/\s*20',
-        "차별성": r'차별성\s*[:：]\s*(\d+)\s*/\s*20',
-    }
-    for key, pattern in patterns.items():
-        match = re.search(pattern, feedback)
-        if match:
-            scores[key] = int(match.group(1))
-    return scores
+    """AI 피드백에서 항목별 점수를 추출 (ai_client.parse_detail_scores 위임).
+
+    None 값은 호환을 위해 반환 dict에서 제거하여, 기존 .get(label, 0) 호출이
+    그대로 동작하도록 한다.
+    """
+    raw = parse_detail_scores(feedback)
+    return {k: v for k, v in raw.items() if v is not None}
 
 
 def render_resume_page(db: InterviewDB):
@@ -374,7 +422,7 @@ def render_resume_page(db: InterviewDB):
     # 직무 선택
     resume_job = st.selectbox(
         "자소서 직무",
-        [j for j in JOB_FIELDS if j != "기타 (직접 입력)"],
+        JOB_FIELDS,
         key="resume_job_select",
     )
 
@@ -536,6 +584,93 @@ def render_data_dashboard(db: InterviewDB):
         st.rerun()
 
 
+def render_weakness_page(config: ConfigManager, db: InterviewDB):
+    """🎯 약점 집중 연습 페이지.
+
+    최근 면접 데이터에서 항목별 평균 점수를 시각화하고, 가장 취약한 영역에
+    초점을 맞춘 맞춤 면접 질문을 생성한다.
+    """
+    st.subheader("🎯 약점 집중 연습")
+    st.caption("최근 면접 평가 데이터에서 약점 영역을 식별해 집중적으로 강화할 수 있어요.")
+
+    # 직무 필터
+    filter_options = ["전체"] + JOB_FIELDS
+    default_idx = 0
+    prev = st.session_state.get("weakness_job_filter")
+    if prev in filter_options:
+        default_idx = filter_options.index(prev)
+    selected = st.selectbox(
+        "직무 필터",
+        filter_options,
+        index=default_idx,
+        key="weakness_job_select",
+    )
+    st.session_state["weakness_job_filter"] = selected
+    job_filter = None if selected == "전체" else selected
+
+    profile = db.get_weakness_profile(job_field=job_filter)
+    if not profile:
+        st.info("최소 3건 이상의 평가 데이터가 필요합니다. 면접을 진행해 데이터를 모아주세요.")
+        if st.button("홈으로", use_container_width=True):
+            st.session_state["show_weakness_page"] = False
+            st.rerun()
+        return
+
+    # 점수 분포 막대차트
+    st.markdown("**📊 항목별 평균 점수 (최근 20건 기준 / 20점 만점)**")
+    df = pd.DataFrame.from_dict(profile, orient="index", columns=["평균 점수"])
+    st.bar_chart(df)
+
+    # 가장 취약한 영역
+    weakest = min(profile, key=profile.get)
+    st.warning(f"가장 취약한 영역: **{weakest}** (평균 {profile[weakest]:.1f}점)")
+
+    # 직무가 지정되지 않은 경우 약점 강화 질문은 어떤 직무로 만들지 안내
+    target_job_for_question = job_filter or st.session_state.get("job_field") or JOB_FIELDS[0]
+    target_bu = st.session_state.get("business_unit") or ""
+    target_type = st.session_state.get("interview_type", "직무면접")
+    st.caption(
+        f"질문 생성 기준 → 직무: **{target_job_for_question}**"
+        + (f", 사업부: **{target_bu}**" if target_bu else "")
+        + f", 유형: **{target_type}**"
+    )
+
+    if st.button("🎯 이 약점을 강화하는 질문 받기", use_container_width=True, type="primary"):
+        if not config.is_configured():
+            st.error("API 키를 먼저 사이드바에서 입력해주세요.")
+        else:
+            with st.spinner("약점 강화 질문을 생성하고 있습니다..."):
+                try:
+                    ai_client = get_ai_client(config)
+                    resume_content = ""
+                    if target_type == "자소서기반면접":
+                        resume_content = db.get_resume(target_job_for_question) or ""
+                    question = ai_client.generate_targeted_question(
+                        job_field=target_job_for_question,
+                        weakness=weakest,
+                        interview_type=target_type,
+                        business_unit=target_bu,
+                        resume_content=resume_content,
+                    )
+                    # 약점 강화 모드로 정규 답변 플로우 진입
+                    st.session_state["weakness_target"] = weakest
+                    st.session_state["job_field"] = target_job_for_question
+                    st.session_state["business_unit"] = target_bu or None
+                    st.session_state["interview_type"] = target_type
+                    st.session_state["current_question"] = question
+                    st.session_state["feedback"] = None
+                    st.session_state["question_count"] = 0
+                    st.session_state["interview_active"] = True
+                    st.session_state["show_weakness_page"] = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"질문 생성 실패: {e}")
+
+    if st.button("홈으로", use_container_width=True):
+        st.session_state["show_weakness_page"] = False
+        st.rerun()
+
+
 def render_daily_quote():
     """오늘의 명언 렌더링 (API 호출 없이 하드코딩된 명언 사용)."""
     quote = get_daily_quote()
@@ -547,15 +682,24 @@ def render_daily_quote():
 
 def render_interview(config: ConfigManager, db: InterviewDB):
     job_field = st.session_state["job_field"]
+    business_unit = st.session_state.get("business_unit")
     interview_type = st.session_state.get("interview_type", "직무면접")
     company = st.session_state.get("company", "")
 
+    # 회사 정보 캐시 조회 (있으면 AI 프롬프트에 주입)
+    company_info = db.get_company_info(company) if company else None
+
     type_emoji = {"직무면접": "💼", "인성면접": "🧠", "자소서기반면접": "📄"}
-    header_text = f"{type_emoji.get(interview_type, '🎯')} {job_field} - {interview_type}"
+    job_label = f"{job_field}" + (f" ({business_unit})" if business_unit else "")
+    header_text = f"{type_emoji.get(interview_type, '🎯')} {job_label} - {interview_type}"
     if company:
-        header_text += f" ({company})"
+        header_text += f" / {company}"
+        if company_info:
+            header_text += " 📚"  # 캐시 적중 배지
     st.subheader(header_text)
     st.caption(f"질문 #{st.session_state['question_count'] + 1}")
+    if company_info:
+        st.caption(f"💡 '{company_info['name']}' 회사 정보가 면접 컨텍스트에 자동 반영됩니다")
 
     if st.session_state["current_question"] is None:
         with st.spinner("질문을 준비하고 있습니다..."):
@@ -587,12 +731,18 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                     interview_type=interview_type,
                     resume_content=resume_content,
                     company=company,
+                    business_unit=business_unit,
+                    company_info=company_info,
                 )
                 st.session_state["current_question"] = question
                 st.session_state["feedback"] = None
             except Exception as e:
                 st.error(f"질문 생성 실패: {e}")
                 return
+
+    # 약점 강화 모드 배지
+    if st.session_state.get("weakness_target"):
+        st.caption(f"🎯 약점 강화 모드: {st.session_state['weakness_target']}")
 
     # 질문 표시
     st.markdown(
@@ -601,9 +751,37 @@ def render_interview(config: ConfigManager, db: InterviewDB):
     )
 
     if st.session_state["feedback"] is None:
+        input_mode = st.radio(
+            "답변 입력 방식",
+            ["⌨️ 텍스트 입력", "🎤 음성 입력"],
+            horizontal=True,
+            key="answer_input_mode",
+        )
+
+        if input_mode == "🎤 음성 입력":
+            from streamlit_mic_recorder import mic_recorder
+            audio = mic_recorder(
+                start_prompt="🎙️ 녹음 시작",
+                stop_prompt="⏹️ 녹음 종료",
+                just_once=True,
+                use_container_width=True,
+                format="wav",
+                key="mic_input",
+            )
+            if audio and audio.get("bytes"):
+                with st.spinner("음성을 텍스트로 변환 중..."):
+                    try:
+                        ai_client = get_ai_client(config)
+                        transcribed = ai_client.transcribe_audio(audio["bytes"], mime_type="audio/wav")
+                        st.session_state["transcribed_answer"] = transcribed
+                        st.success("음성을 텍스트로 변환했습니다. 아래에서 확인 후 제출해주세요.")
+                    except RuntimeError as e:
+                        st.error(str(e))
+
         with st.form(key="answer_form"):
             user_answer = st.text_area(
                 "답변을 입력하세요",
+                value=st.session_state.get("transcribed_answer", ""),
                 height=200,
                 placeholder="면접 질문에 대한 답변을 작성해주세요...",
             )
@@ -621,9 +799,12 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                                 job_field,
                                 interview_type=interview_type,
                                 company=company,
+                                business_unit=business_unit,
+                                company_info=company_info,
                             )
                             # 피드백에서 점수 추출
                             score = extract_score(feedback)
+                            detail = parse_detail_scores(feedback)
                             st.session_state["feedback"] = feedback
                             st.session_state["last_answer"] = user_answer.strip()
                             st.session_state["question_count"] += 1
@@ -634,7 +815,16 @@ def render_interview(config: ConfigManager, db: InterviewDB):
                                 feedback=feedback,
                                 score=score,
                                 interview_type=interview_type,
+                                business_unit=business_unit,
+                                logic_score=detail.get("논리성"),
+                                fit_score=detail.get("직무적합성"),
+                                detail_score=detail.get("구체성"),
+                                expression_score=detail.get("표현력"),
+                                uniqueness_score=detail.get("차별성"),
                             )
+                            st.session_state.pop("transcribed_answer", None)
+                            # 약점 강화 모드는 답변 후 자동 해제
+                            st.session_state.pop("weakness_target", None)
                             st.rerun()
                         except Exception as e:
                             st.error(f"평가 실패: {e}")
@@ -745,9 +935,11 @@ def render_records(db: InterviewDB):
         interview_type = record.get('interview_type', '직무면접')
         type_emoji = {"직무면접": "💼", "인성면접": "🧠", "자소서기반면접": "📄"}
         emoji = type_emoji.get(interview_type, "🎯")
-        with st.expander(f"{emoji} [{record['job_field']}] {record['question'][:50]}... ({record['date'][:10]})"):
+        bu = record.get('business_unit')
+        job_label = f"[{record['job_field']}]" + (f"({bu})" if bu else "")
+        with st.expander(f"{emoji} {job_label} {record['question'][:50]}... ({record['date'][:10]})"):
             st.markdown(f"**날짜:** {record['date']}")
-            st.markdown(f"**직무:** {record['job_field']}")
+            st.markdown(f"**직무:** {record['job_field']}" + (f" / **사업부:** {bu}" if bu else ""))
             st.markdown(f"**면접 유형:** {interview_type}")
             if record.get('score'):
                 st.markdown(f"**점수:** {record['score']}/100")
@@ -818,6 +1010,8 @@ def main():
         render_resume_page(db)
     elif st.session_state.get("show_records"):
         render_records(db)
+    elif st.session_state.get("show_weakness_page"):
+        render_weakness_page(config, db)
     elif st.session_state.get("interview_active"):
         render_interview(config, db)
     else:

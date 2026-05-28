@@ -4,6 +4,8 @@
 Google Gemini API를 기본으로 사용하고, 실패 시 Groq API로 자동 전환한다.
 """
 
+import re
+
 import google.generativeai as genai
 from openai import OpenAI
 
@@ -14,6 +16,35 @@ SYSTEM_PROMPT = (
     "반드시 한국어로만 답변해. 한자(漢字), 중국어, 일본어, 키릴 문자 등 외국 문자를 절대 사용하지 마. "
     "한글, 영문 알파벳, 숫자, 기본 문장부호만 사용해."
 )
+
+
+def parse_detail_scores(feedback_text: str) -> dict:
+    """피드백 텍스트에서 항목별 점수(0~20)를 추출.
+
+    Returns:
+        {'논리성': int|None, '직무적합성': int|None, '구체성': int|None,
+         '표현력': int|None, '차별성': int|None}
+        각 키는 항상 존재하며, 추출 실패 시 값은 None.
+    """
+    patterns = {
+        "논리성": r'논리성\s*[:：]\s*(\d+)\s*/\s*20',
+        "직무적합성": r'직무\s*적합성\s*[:：]\s*(\d+)\s*/\s*20',
+        "구체성": r'구체성\s*[:：]\s*(\d+)\s*/\s*20',
+        "표현력": r'표현력\s*[:：]\s*(\d+)\s*/\s*20',
+        "차별성": r'차별성\s*[:：]\s*(\d+)\s*/\s*20',
+    }
+    scores: dict = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, feedback_text or "")
+        if match:
+            try:
+                value = int(match.group(1))
+                scores[key] = value if 0 <= value <= 20 else None
+            except (ValueError, TypeError):
+                scores[key] = None
+        else:
+            scores[key] = None
+    return scores
 
 
 class AIClient:
@@ -77,14 +108,31 @@ class AIClient:
 
         raise RuntimeError("사용 가능한 AI 모델이 없습니다. API 키를 확인해주세요.")
 
-    def generate_question(self, job_field: str, context_hint: str = "", interview_type: str = "직무면접", resume_content: str = "", company: str = "") -> str:
+    def generate_question(self, job_field: str, context_hint: str = "", interview_type: str = "직무면접", resume_content: str = "", company: str = "", business_unit: str = "", company_info: dict | None = None) -> str:
         company_context = ""
         if company:
             company_context = f"지원 회사는 '{company}'이야. 이 회사의 인재상, 직무 특성, 최신 동향을 반영한 질문을 만들어줘. "
 
+        # 캐시된 회사 정보가 있으면 프롬프트에 구체 정보 주입
+        if company_info:
+            company_context += (
+                f"\n[참고 - {company_info.get('name', company)} 정보]\n"
+                f"- 인재상: {company_info.get('talent_profile', '')}\n"
+                f"- 주력 사업: {company_info.get('business_focus', '')}\n"
+                f"- 최근 트렌드: {company_info.get('recent_news_summary', '')}\n"
+                f"위 정보를 반드시 질문에 녹여서, 이 회사 면접에서 실제로 나올 법한 구체적 질문을 만들어줘.\n"
+            )
+
+        job_context = f"'{job_field}'"
+        if business_unit:
+            job_context += f" 직무 (사업부: {business_unit})"
+            company_context += f"사업부 '{business_unit}'의 특성(주력 제품, 핵심 기술, 최근 동향)을 반영한 질문을 만들어줘. "
+        else:
+            job_context += " 직무"
+
         if interview_type == "자소서기반면접" and resume_content:
             prompt = (
-                f"아래는 '{job_field}' 직무에 지원한 지원자의 자기소개서야:\n\n"
+                f"아래는 {job_context}에 지원한 지원자의 자기소개서야:\n\n"
                 f"---\n{resume_content}\n---\n\n"
                 f"{company_context}"
                 f"이 자기소개서 내용을 바탕으로 면접관이 물어볼 수 있는 "
@@ -94,7 +142,7 @@ class AIClient:
             )
         elif interview_type == "인성면접":
             prompt = (
-                f"'{job_field}' 직무 면접에서 나올 수 있는 인성 면접 질문을 하나만 생성해줘. "
+                f"{job_context} 면접에서 나올 수 있는 인성 면접 질문을 하나만 생성해줘. "
                 f"{company_context}"
                 f"지원자의 가치관, 팀워크, 갈등 해결, 리더십, 스트레스 관리, 실패 경험 등 "
                 f"인성/역량을 평가하는 질문이어야 해. "
@@ -102,7 +150,7 @@ class AIClient:
             )
         else:
             prompt = (
-                f"'{job_field}' 직무 면접에서 나올 수 있는 실전 면접 질문을 하나만 생성해줘. "
+                f"{job_context} 면접에서 나올 수 있는 실전 면접 질문을 하나만 생성해줘. "
                 f"{company_context}"
                 f"직무 전문 지식이나 기술적 역량을 평가하는 질문이어야 해. "
                 f"해당 직무의 최신 트렌드와 현장 실무를 반영한 질문이면 좋겠어. "
@@ -112,7 +160,7 @@ class AIClient:
             prompt += context_hint
         return self._call(prompt)
 
-    def evaluate_answer(self, question: str, answer: str, job_field: str, interview_type: str = "직무면접", company: str = "") -> str:
+    def evaluate_answer(self, question: str, answer: str, job_field: str, interview_type: str = "직무면접", company: str = "", business_unit: str = "", company_info: dict | None = None) -> str:
         type_guidance = ""
         if interview_type == "인성면접":
             type_guidance = (
@@ -129,8 +177,24 @@ class AIClient:
         if company:
             company_context = f"지원 회사: {company}\n이 회사의 인재상과 직무 특성을 고려하여 평가해줘.\n"
 
+        # 캐시된 회사 정보가 있으면 평가 기준에 구체 정보 주입
+        if company_info:
+            company_context += (
+                f"\n[참고 - {company_info.get('name', company)} 정보]\n"
+                f"- 인재상: {company_info.get('talent_profile', '')}\n"
+                f"- 주력 사업: {company_info.get('business_focus', '')}\n"
+                f"- 최근 트렌드: {company_info.get('recent_news_summary', '')}\n"
+                f"이 회사의 인재상과 주력 사업에 대한 답변의 적합성을 반드시 평가에 반영하고, "
+                f"피드백에 회사 특성을 언급해줘.\n"
+            )
+
+        bu_context = ""
+        if business_unit:
+            bu_context = f"사업부: {business_unit}\n해당 사업부의 주력 제품·핵심 기술과 답변의 적합성을 함께 평가해줘.\n"
+
         prompt = (
             f"직무: {job_field}\n"
+            f"{bu_context}"
             f"면접 유형: {interview_type}\n"
             f"{company_context}"
             f"면접 질문: {question}\n"
@@ -173,3 +237,84 @@ class AIClient:
         if not api_key.strip():
             return False
         return True
+
+    def transcribe_audio(self, audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
+        """Transcribe Korean speech to text via Gemini multimodal.
+
+        Raises RuntimeError if Gemini is unavailable (no Groq audio fallback)."""
+        if self.gemini_model is None:
+            raise RuntimeError("음성 전사를 위해 Gemini API 키가 필요합니다.")
+        try:
+            content = [
+                {"mime_type": mime_type, "data": audio_bytes},
+                "이 한국어 음성을 정확히 받아써줘. 음성 내용만 출력하고 설명이나 따옴표는 붙이지 마. 한자, 일본어 등 외국 문자는 사용하지 마.",
+            ]
+            response = self.gemini_model.generate_content(content)
+            return response.text.strip()
+        except Exception as e:
+            raise RuntimeError(f"음성 전사 실패: {e}")
+
+    def generate_targeted_question(
+        self,
+        job_field: str,
+        weakness: str,
+        interview_type: str = "직무면접",
+        business_unit: str = "",
+        resume_content: str = "",
+    ) -> str:
+        """약점 영역을 집중 평가하는 맞춤 면접 질문 생성.
+
+        generate_question의 프롬프트 스캐폴딩을 재사용하면서, 응시자의 특정 약점
+        역량을 집중적으로 검증하도록 디렉티브를 덧붙인다.
+
+        Args:
+            job_field: 직무 분야
+            weakness: 보강할 약점 영역 (논리성/직무적합성/구체성/표현력/차별성)
+            interview_type: 면접 유형
+            business_unit: 사업부 (선택)
+            resume_content: 자소서 내용 (자소서기반면접 시)
+
+        Returns:
+            str: 생성된 면접 질문
+        """
+        job_context = f"'{job_field}'"
+        if business_unit:
+            job_context += f" 직무 (사업부: {business_unit})"
+        else:
+            job_context += " 직무"
+
+        bu_context = ""
+        if business_unit:
+            bu_context = (
+                f"사업부 '{business_unit}'의 특성(주력 제품, 핵심 기술, 최근 동향)을 반영한 질문을 만들어줘. "
+            )
+
+        if interview_type == "자소서기반면접" and resume_content:
+            base = (
+                f"아래는 {job_context}에 지원한 지원자의 자기소개서야:\n\n"
+                f"---\n{resume_content}\n---\n\n"
+                f"{bu_context}"
+                f"이 자기소개서 내용을 바탕으로 면접관이 물어볼 수 있는 "
+                f"날카롭고 구체적인 면접 질문을 하나만 생성해줘."
+            )
+        elif interview_type == "인성면접":
+            base = (
+                f"{job_context} 면접에서 나올 수 있는 인성 면접 질문을 하나만 생성해줘. "
+                f"{bu_context}"
+                f"지원자의 가치관, 팀워크, 갈등 해결, 리더십 등 인성/역량을 평가하는 질문이어야 해."
+            )
+        else:
+            base = (
+                f"{job_context} 면접에서 나올 수 있는 실전 면접 질문을 하나만 생성해줘. "
+                f"{bu_context}"
+                f"직무 전문 지식이나 기술적 역량을 평가하는 질문이어야 해. "
+                f"해당 직무의 최신 트렌드와 현장 실무를 반영한 질문이면 좋겠어."
+            )
+
+        directive = (
+            f" 이 질문은 응시자의 '{weakness}' 역량을 집중적으로 평가하도록 설계해. "
+            f"답변자가 그 역량을 보여주지 않으면 좋은 점수를 받기 어려운 질문을 만들어줘. "
+            f"질문만 출력하고 다른 설명은 붙이지 마."
+        )
+        prompt = base + directive
+        return self._call(prompt)
