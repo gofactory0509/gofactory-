@@ -292,9 +292,8 @@ class _ByokAwareClient:
 def get_ai_client(config: ConfigManager):
     """AI 클라이언트 팩토리 (BYOK 인지 어댑터 반환).
 
-    세션에 OpenRouter 키가 있으면 LLMRouter 우선, 없으면 기존 Gemini+Groq.
-    어떤 경우든 같은 인터페이스(generate_question / evaluate_answer / ...) 를
-    제공한다.
+    기본은 LLMRouter — BYOK OpenRouter 키 있으면 OpenRouter, 없으면 Bedrock Haiku.
+    Gemini/Groq는 ``transcribe_audio`` 등 legacy 메서드 폴백용으로만 유지.
     """
     gemini_key = config.get_api_key()
     groq_key = os.environ.get("GROQ_API_KEY", "")
@@ -306,17 +305,20 @@ def get_ai_client(config: ConfigManager):
 
     primary = AIClient(gemini_key=gemini_key, groq_key=groq_key)
 
-    # BYOK 세션 상태 확인
-    or_key = st.session_state.get("openrouter_key", "") or ""
-    or_model = st.session_state.get("openrouter_model", "") or ""
+    or_key = (st.session_state.get("openrouter_key", "") or "").strip()
+    or_model = (st.session_state.get("openrouter_model", "") or "").strip()
 
+    # LLMRouter는 키가 비어 있어도 Bedrock으로 자동 폴백 — 항상 만든다.
+    # 라우터 초기화 자체가 실패할 때만 primary(Gemini/Groq) 로 떨어진다.
     router = None
-    if or_key:
-        try:
-            from backend.services.llm_router import LLMRouter
-            router = LLMRouter(user_openrouter_key=or_key, user_model=or_model or None)
-        except Exception:
-            router = None  # 라우터 초기화 실패 시 기존 흐름 유지
+    try:
+        from backend.services.llm_router import LLMRouter
+        router = LLMRouter(
+            user_openrouter_key=or_key or None,
+            user_model=or_model or None,
+        )
+    except Exception:
+        router = None
 
     return _ByokAwareClient(primary, router)
 
@@ -426,27 +428,30 @@ def _render_byok_sidebar() -> None:
 
         # 현재 사용 백엔드 배지
         if st.session_state.get("openrouter_key"):
-            st.caption("📍 현재 백엔드: 🔑 OpenRouter")
+            st.caption("📍 현재 백엔드: 🔑 OpenRouter (BYOK)")
         else:
-            st.caption("📍 현재 백엔드: 📡 Bedrock / Gemini (기본)")
+            st.caption("📍 현재 백엔드: 📡 AWS Bedrock Haiku · 키 입력 없이 바로 사용")
 
 
 def render_sidebar(config: ConfigManager, db: InterviewDB):
     with st.sidebar:
         st.header("면접 설정")
 
-        if not config.is_configured():
-            api_key_input = st.text_input(
-                "Gemini API 키",
-                type="password",
-                placeholder="AIzaSy...",
-            )
-            if api_key_input and api_key_input.strip():
-                config.set_api_key(api_key_input.strip())
-                st.rerun()
-
-        # BYOK 섹션 (Gemini 키 위에 collapsible)
+        # 기본 백엔드는 AWS Bedrock Haiku — 키 없이 즉시 사용 가능.
+        # 사용자 키는 BYOK(OpenRouter) 또는 legacy Gemini로 선택 입력.
         _render_byok_sidebar()
+
+        if not config.is_configured():
+            with st.expander("🔧 Gemini API 키 (선택 · 음성 전사 등)", expanded=False):
+                api_key_input = st.text_input(
+                    "Gemini API 키",
+                    type="password",
+                    placeholder="AIzaSy...",
+                    help="입력하지 않아도 면접은 Bedrock Haiku로 정상 진행됩니다.",
+                )
+                if api_key_input and api_key_input.strip():
+                    config.set_api_key(api_key_input.strip())
+                    st.rerun()
 
         st.subheader("직무 선택")
         selected_job = st.selectbox(
@@ -519,9 +524,7 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
 
         st.divider()
         if st.button("면접 시작", use_container_width=True, type="primary"):
-            if not config.is_configured():
-                st.error("API 키를 먼저 입력해주세요.")
-            elif selected_job is None:
+            if selected_job is None:
                 st.error("직무명을 입력해주세요.")
             elif selected_type == "자소서기반면접" and not db.get_resume(selected_job):
                 st.error("자소서를 먼저 등록해주세요. 아래 '자소서 관리' 버튼을 눌러주세요.")
@@ -855,35 +858,32 @@ def render_weakness_page(config: ConfigManager, db: InterviewDB):
     )
 
     if st.button("🎯 이 약점을 강화하는 질문 받기", use_container_width=True, type="primary"):
-        if not config.is_configured():
-            st.error("API 키를 먼저 사이드바에서 입력해주세요.")
-        else:
-            with st.spinner("약점 강화 질문을 생성하고 있습니다..."):
-                try:
-                    ai_client = get_ai_client(config)
-                    resume_content = ""
-                    if target_type == "자소서기반면접":
-                        resume_content = db.get_resume(target_job_for_question) or ""
-                    question = ai_client.generate_targeted_question(
-                        job_field=target_job_for_question,
-                        weakness=weakest,
-                        interview_type=target_type,
-                        business_unit=target_bu,
-                        resume_content=resume_content,
-                    )
-                    # 약점 강화 모드로 정규 답변 플로우 진입
-                    st.session_state["weakness_target"] = weakest
-                    st.session_state["job_field"] = target_job_for_question
-                    st.session_state["business_unit"] = target_bu or None
-                    st.session_state["interview_type"] = target_type
-                    st.session_state["current_question"] = question
-                    st.session_state["feedback"] = None
-                    st.session_state["question_count"] = 0
-                    st.session_state["interview_active"] = True
-                    st.session_state["show_weakness_page"] = False
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"질문 생성 실패: {e}")
+        with st.spinner("약점 강화 질문을 생성하고 있습니다..."):
+            try:
+                ai_client = get_ai_client(config)
+                resume_content = ""
+                if target_type == "자소서기반면접":
+                    resume_content = db.get_resume(target_job_for_question) or ""
+                question = ai_client.generate_targeted_question(
+                    job_field=target_job_for_question,
+                    weakness=weakest,
+                    interview_type=target_type,
+                    business_unit=target_bu,
+                    resume_content=resume_content,
+                )
+                # 약점 강화 모드로 정규 답변 플로우 진입
+                st.session_state["weakness_target"] = weakest
+                st.session_state["job_field"] = target_job_for_question
+                st.session_state["business_unit"] = target_bu or None
+                st.session_state["interview_type"] = target_type
+                st.session_state["current_question"] = question
+                st.session_state["feedback"] = None
+                st.session_state["question_count"] = 0
+                st.session_state["interview_active"] = True
+                st.session_state["show_weakness_page"] = False
+                st.rerun()
+            except Exception as e:
+                st.error(f"질문 생성 실패: {e}")
 
     if st.button("홈으로", use_container_width=True):
         st.session_state["show_weakness_page"] = False
