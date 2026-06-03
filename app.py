@@ -207,6 +207,33 @@ CUSTOM_CSS = """
     section[data-testid="stSidebar"] {
         background: #f7f8fc;
     }
+
+    /* 회사 인재상 배너 (면접 화면 맨 위) */
+    .company-banner {
+        background: linear-gradient(135deg, #ebf4ff 0%, #e9d8fd 100%);
+        border-left: 4px solid #667eea;
+        border-radius: 12px;
+        padding: 1rem 1.3rem;
+        margin: 0.6rem 0 1.2rem;
+        box-shadow: 0 2px 6px rgba(102,126,234,0.08);
+    }
+    .company-banner .cb-name {
+        font-size: 1.05rem; font-weight: 700; color: #2d3748;
+        margin-bottom: 0.35rem; display: flex; align-items: baseline; gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+    .company-banner .cb-industry {
+        font-size: 0.78rem; color: #718096; font-weight: 500;
+        background: white; padding: 0.15rem 0.55rem; border-radius: 999px;
+    }
+    .company-banner .cb-talent {
+        font-size: 0.95rem; color: #2d3748; line-height: 1.55;
+        font-weight: 500;
+    }
+    .company-banner .cb-focus {
+        font-size: 0.85rem; color: #667eea; margin-top: 0.4rem;
+        font-weight: 600;
+    }
 </style>
 """
 
@@ -888,10 +915,39 @@ def render_interview(config: ConfigManager, db: InterviewDB):
         header_text += f" / {company}"
         if company_info:
             header_text += " 📚"  # 캐시 적중 배지
+    # 회사 인재상 배너 (선택한 회사가 캐시에 있을 때 면접 화면 맨 위에 표시)
+    if company_info:
+        talent_raw = (company_info.get('talent_profile') or '').strip()
+        # 첫 문장만 추출 (마침표 기준), 없으면 앞 90자
+        talent_summary = ""
+        for sep in ['. ', '。', '.\n']:
+            if sep in talent_raw:
+                talent_summary = talent_raw.split(sep)[0].strip().rstrip('.') + '.'
+                break
+        if not talent_summary:
+            talent_summary = (talent_raw[:90] + '…') if len(talent_raw) > 90 else talent_raw
+
+        business_focus = (company_info.get('business_focus') or '').strip()
+        # 주력 사업도 앞부분만
+        if business_focus and ',' in business_focus:
+            business_short = ' · '.join([s.strip() for s in business_focus.split(',')[:3]])
+        else:
+            business_short = business_focus[:80]
+
+        industry = (company_info.get('industry') or '').strip()
+        industry_html = f'<span class="cb-industry">{industry}</span>' if industry else ''
+        focus_html = f'<div class="cb-focus">📌 주력: {business_short}</div>' if business_short else ''
+        st.markdown(
+            f'<div class="company-banner">'
+            f'<div class="cb-name">🏢 {company_info["name"]} {industry_html}</div>'
+            f'<div class="cb-talent">{talent_summary}</div>'
+            f'{focus_html}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
     st.subheader(header_text)
     st.caption(f"질문 #{st.session_state['question_count'] + 1}")
-    if company_info:
-        st.caption(f"💡 '{company_info['name']}' 회사 정보가 면접 컨텍스트에 자동 반영됩니다")
 
     if st.session_state["current_question"] is None:
         with st.spinner("질문을 준비하고 있습니다..."):

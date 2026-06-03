@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Go터뷰 — AWS Batch 정기 크롤링 파이프라인</title>
+<style>
+:root {
+  --primary: #667eea;
+  --primary-dark: #764ba2;
+  --accent: #f093fb;
+  --ink: #1a202c;
+  --ink-2: #2d3748;
+  --muted: #718096;
+  --card: #ffffff;
+  --bg-soft: #f7f8fc;
+  --ok: #38a169;
+  --warn: #d69e2e;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Pretendard", system-ui, sans-serif;
+  color: var(--ink);
+  background: #0f172a;
+  -webkit-font-smoothing: antialiased;
+}
+#deck { position: relative; width: 100vw; height: 100vh; }
+.slide {
+  position: absolute; inset: 0;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4vh 6vw;
+  background: linear-gradient(135deg, #f8f9fc 0%, #ffffff 100%);
+  overflow-y: auto;
+}
+.slide.active { display: flex; }
+.slide h1 { font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 800; letter-spacing: -0.03em; }
+.slide h2 { font-size: clamp(1.4rem, 2.8vw, 2.2rem); font-weight: 700; margin-bottom: 1.2rem; color: var(--ink-2); }
+.slide h3 { font-size: clamp(1.0rem, 1.8vw, 1.4rem); font-weight: 700; color: var(--ink-2); margin-bottom: 0.5rem; }
+.slide p, .slide li { font-size: clamp(0.95rem, 1.3vw, 1.15rem); line-height: 1.6; color: var(--ink-2); }
+.slide ul { list-style: none; }
+.slide ul li { padding-left: 1.4rem; position: relative; margin-bottom: 0.7rem; }
+.slide ul li::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  position: absolute; left: 0; top: 0.6rem;
+}
+code, .mono { font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; font-size: 0.92em; }
+
+/* Hero slide */
+.hero {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  align-items: flex-start;
+  justify-content: center;
+}
+.hero .badge { display: inline-block; padding: 0.4rem 1rem; background: rgba(255,255,255,0.18); border-radius: 999px; font-size: 0.9rem; margin-bottom: 1.5rem; }
+.hero h1 { color: white; font-size: clamp(2.5rem, 5.5vw, 4.5rem); line-height: 1.1; margin-bottom: 1rem; }
+.hero .sub { font-size: clamp(1.1rem, 1.8vw, 1.5rem); opacity: 0.92; margin-bottom: 2rem; }
+.hero .meta { display: flex; gap: 2rem; font-size: 0.95rem; opacity: 0.85; }
+.hero .meta div::before { content: "▸ "; opacity: 0.7; }
+
+/* Layout helpers */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: start; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; align-items: start; }
+.card {
+  background: var(--card);
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1.5rem 1.8rem;
+  box-shadow: 0 4px 12px rgba(102,126,234,0.08);
+}
+.card-accent { border-left: 4px solid var(--primary); }
+.kpi {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border-radius: 16px;
+  padding: 1.4rem;
+  text-align: center;
+}
+.kpi .num { font-size: clamp(2rem, 3.5vw, 3rem); font-weight: 800; line-height: 1; }
+.kpi .label { opacity: 0.92; margin-top: 0.4rem; font-size: 0.95rem; }
+.pill { display: inline-block; padding: 0.25rem 0.7rem; border-radius: 999px; font-size: 0.82rem; font-weight: 600; }
+.pill-ok { background: #c6f6d5; color: #22543d; }
+.pill-warn { background: #fefcbf; color: #744210; }
+.pill-primary { background: #ebf4ff; color: #2c5282; }
+
+/* Arch diagram (SVG container) */
+.arch-svg { width: 100%; max-width: 1100px; margin: 1rem auto; display: block; }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
+th, td { padding: 0.7rem 0.9rem; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 0.95rem; }
+th { background: var(--bg-soft); font-weight: 700; color: var(--ink-2); }
+tr:last-child td { border-bottom: none; }
+td.right { text-align: right; }
+.total-row td { font-weight: 800; background: linear-gradient(90deg, rgba(102,126,234,0.05), transparent); }
+
+/* Code block */
+pre.code {
+  background: #1a202c;
+  color: #e2e8f0;
+  padding: 1.2rem 1.4rem;
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+pre.code .cmt { color: #718096; }
+pre.code .key { color: #f6ad55; }
+pre.code .str { color: #9ae6b4; }
+
+/* Navigation */
+.nav {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 0.8rem;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  padding: 0.5rem 0.8rem;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+  z-index: 100;
+}
+.nav button {
+  border: none; background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white; width: 36px; height: 36px; border-radius: 50%;
+  cursor: pointer; font-size: 1.1rem; font-weight: 700;
+  transition: transform 0.15s;
+}
+.nav button:hover { transform: scale(1.08); }
+.nav button:disabled { opacity: 0.35; cursor: not-allowed; }
+.nav .counter { font-weight: 700; color: var(--ink-2); padding: 0 0.5rem; min-width: 64px; text-align: center; }
+.progress {
+  position: fixed; top: 0; left: 0; height: 4px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  transition: width 0.3s; z-index: 99;
+}
+.hint {
+  position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%);
+  color: var(--muted); font-size: 0.85rem;
+  background: rgba(255,255,255,0.7); padding: 0.3rem 0.8rem; border-radius: 999px;
+  pointer-events: none;
+  opacity: 0; transition: opacity 0.3s;
+}
+.hint.show { opacity: 1; }
+
+/* Misc */
+.muted { color: var(--muted); }
+.callout {
+  background: linear-gradient(135deg, #ebf4ff 0%, #e9d8fd 100%);
+  border-radius: 12px;
+  padding: 1rem 1.3rem;
+  margin-top: 1rem;
+  font-size: 0.95rem;
+}
+.tag { background: var(--bg-soft); padding: 0.2rem 0.6rem; border-radius: 6px; font-family: monospace; font-size: 0.88em; }
+.title-bar {
+  display: flex; align-items: center; gap: 0.9rem; margin-bottom: 1.3rem;
+}
+.title-bar .num-circle {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white; display: grid; place-items: center; font-weight: 800; font-size: 1.1rem;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+<div class="progress" id="progress" style="width: 0%"></div>
+<div class="hint" id="hint">← → 화살표로 이동 · F11 풀스크린</div>
+
+<main id="deck">
+
+<!-- 1. 표지 -->
+<section class="slide hero active">
+  <div class="badge">반도체 산업 특화 AI 면접 연습 서비스 · Phase 3</div>
+  <h1>AWS Batch 정기<br>회사 정보 갱신 파이프라인</h1>
+  <p class="sub">매주 일요일 새벽 02시 — 5개사 인재상·트렌드·공시를 자동 수집·요약</p>
+  <div class="meta">
+    <div>EventBridge → AWS Batch (Fargate Spot)</div>
+    <div>월 ~$1.53</div>
+    <div>발표: Go터뷰 팀</div>
+  </div>
+</section>
+
+<!-- 2. 문제 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">1</div><h2>문제: 회사 정보 캐시는 시간을 이기지 못한다</h2></div>
+  <div class="grid-2">
+    <div>
+      <p>Go터뷰는 5개 반도체 기업의 <strong>인재상·주력사업·최근 트렌드</strong>를 AI 면접 프롬프트에 주입해서 회사 맞춤 면접 질문을 만든다.</p>
+      <ul style="margin-top: 1.2rem">
+        <li>HBM4 양산, EUV 3nm, AI 가속기 마하-1 — <strong>주간 단위로 트렌드가 바뀐다</strong></li>
+        <li>채용 페이지 인재상도 시즌마다 개정</li>
+        <li>DART 공시는 분기·반기 단위로 업데이트</li>
+        <li>매번 손으로 갱신은 비현실적 · 누락 위험</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card card-accent">
+        <h3>현재 상태 (Phase 1)</h3>
+        <p class="muted" style="margin-top: 0.4rem">5개 회사 시드 데이터 <span class="pill pill-warn">수동 작성</span></p>
+        <p style="margin-top: 0.9rem">LLM이 학습 컷오프 이후 트렌드를 모르고, 매번 인간이 업데이트해야 함 → 운영 불가</p>
+      </div>
+      <div class="card card-accent" style="margin-top: 1rem; border-left-color: var(--ok)">
+        <h3>목표 (Phase 3)</h3>
+        <p class="muted" style="margin-top: 0.4rem">매주 자동 갱신 <span class="pill pill-ok">cron 기반</span></p>
+        <p style="margin-top: 0.9rem">서버 운영자 손 안 대고 매주 일요일 새벽 알아서 신선한 데이터로 교체</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. 해결 개요 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">2</div><h2>해결: 하이브리드 캐시 + 정기 자동 갱신</h2></div>
+  <div class="grid-2">
+    <div>
+      <h3>실시간 트랙</h3>
+      <p>면접 요청 → 캐시 hit → 즉시 회사 정보 주입. 캐시 miss는 실시간 검색으로 폴백 (Phase 2).</p>
+      <div class="callout">사용자 면접 응답 지연 <strong>+0초</strong> — 캐시에서 바로 꺼냄.</div>
+    </div>
+    <div>
+      <h3>정기 갱신 트랙 (이 발표)</h3>
+      <p>매주 일요일 02:00 KST → AWS Batch가 5개 회사 크롤링 → Bedrock으로 요약 → S3 스냅샷 → EC2가 동기화.</p>
+      <div class="callout">신선도 1주, 운영자 개입 <strong>0회</strong>.</div>
+    </div>
+  </div>
+  <div class="grid-3" style="margin-top: 2rem">
+    <div class="kpi"><div class="num">5</div><div class="label">회사 (MVP) → 20 확장</div></div>
+    <div class="kpi"><div class="num">5 분</div><div class="label">1회 실행 시간</div></div>
+    <div class="kpi"><div class="num">$1.53/월</div><div class="label">전체 비용</div></div>
+  </div>
+</section>
+
+<!-- 4. 아키텍처 다이어그램 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">3</div><h2>전체 아키텍처</h2></div>
+  <svg class="arch-svg" viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#667eea"/><stop offset="1" stop-color="#764ba2"/>
+      </linearGradient>
+      <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#f093fb"/><stop offset="1" stop-color="#f5576c"/>
+      </linearGradient>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#667eea"/>
+      </marker>
+      <filter id="shadow"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15"/></filter>
+    </defs>
+
+    <!-- 박스: EventBridge -->
+    <g filter="url(#shadow)">
+      <rect x="20" y="50" width="190" height="80" rx="14" fill="url(#g1)"/>
+      <text x="115" y="83" text-anchor="middle" fill="white" font-weight="800" font-size="16">EventBridge</text>
+      <text x="115" y="106" text-anchor="middle" fill="white" font-size="12" opacity="0.92">cron(0 17 ? * SAT *)</text>
+      <text x="115" y="122" text-anchor="middle" fill="white" font-size="12" opacity="0.92">매주 일 02:00 KST</text>
+    </g>
+
+    <!-- 화살표 → Batch -->
+    <line x1="210" y1="90" x2="280" y2="90" stroke="#667eea" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- 박스: Batch Job Queue -->
+    <g filter="url(#shadow)">
+      <rect x="280" y="50" width="190" height="80" rx="14" fill="white" stroke="#667eea" stroke-width="2"/>
+      <text x="375" y="80" text-anchor="middle" fill="#2d3748" font-weight="800" font-size="15">AWS Batch</text>
+      <text x="375" y="100" text-anchor="middle" fill="#718096" font-size="12">Job Queue</text>
+      <text x="375" y="118" text-anchor="middle" fill="#718096" font-size="12">Fargate Spot</text>
+    </g>
+
+    <!-- 화살표 → Container -->
+    <line x1="470" y1="90" x2="540" y2="90" stroke="#667eea" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- 박스: 크롤러 컨테이너 -->
+    <g filter="url(#shadow)">
+      <rect x="540" y="20" width="280" height="140" rx="14" fill="white" stroke="#2d3748" stroke-width="2"/>
+      <text x="680" y="45" text-anchor="middle" fill="#2d3748" font-weight="800" font-size="15">크롤러 컨테이너 (ECR)</text>
+      <text x="680" y="65" text-anchor="middle" fill="#718096" font-size="11">python:3.11-slim · 1vCPU · 2GB</text>
+      <line x1="560" y1="78" x2="800" y2="78" stroke="#e2e8f0"/>
+      <text x="555" y="98" fill="#2d3748" font-size="12">• 네이버 뉴스 API (최근 7일)</text>
+      <text x="555" y="116" fill="#2d3748" font-size="12">• DART OpenAPI (공시)</text>
+      <text x="555" y="134" fill="#2d3748" font-size="12">• 채용 페이지 BeautifulSoup</text>
+      <text x="555" y="152" fill="#2d3748" font-size="12">• Bedrock Claude로 요약</text>
+    </g>
+
+    <!-- 화살표 → S3 -->
+    <line x1="820" y1="90" x2="890" y2="90" stroke="#667eea" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- S3 -->
+    <g filter="url(#shadow)">
+      <rect x="890" y="50" width="190" height="80" rx="14" fill="url(#g2)"/>
+      <text x="985" y="83" text-anchor="middle" fill="white" font-weight="800" font-size="16">S3</text>
+      <text x="985" y="106" text-anchor="middle" fill="white" font-size="11" opacity="0.92">gofactory-companies</text>
+      <text x="985" y="122" text-anchor="middle" fill="white" font-size="11" opacity="0.92">snapshots/{date}.db</text>
+    </g>
+
+    <!-- 화살표 ↓ Bedrock from 컨테이너 -->
+    <line x1="680" y1="160" x2="680" y2="220" stroke="#764ba2" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr)"/>
+    <g filter="url(#shadow)">
+      <rect x="580" y="220" width="200" height="60" rx="14" fill="#2d3748"/>
+      <text x="680" y="247" text-anchor="middle" fill="white" font-weight="800" font-size="14">Bedrock</text>
+      <text x="680" y="266" text-anchor="middle" fill="#cbd5e0" font-size="11">Claude Haiku · 요약</text>
+    </g>
+
+    <!-- 화살표 ↓ S3 → EC2 -->
+    <line x1="985" y1="130" x2="985" y2="310" stroke="#f5576c" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr)"/>
+    <text x="1000" y="220" fill="#f5576c" font-size="11">daily timer</text>
+
+    <!-- EC2 -->
+    <g filter="url(#shadow)">
+      <rect x="880" y="310" width="210" height="120" rx="14" fill="white" stroke="#f5576c" stroke-width="2"/>
+      <text x="985" y="336" text-anchor="middle" fill="#2d3748" font-weight="800" font-size="15">EC2 (FastAPI)</text>
+      <text x="985" y="356" text-anchor="middle" fill="#718096" font-size="11">34.230.17.176</text>
+      <line x1="900" y1="368" x2="1070" y2="368" stroke="#e2e8f0"/>
+      <text x="900" y="388" fill="#2d3748" font-size="11">• systemd timer로 S3 pull</text>
+      <text x="900" y="406" fill="#2d3748" font-size="11">• interviews.db 갱신</text>
+      <text x="900" y="424" fill="#2d3748" font-size="11">• 무중단 서비스 유지</text>
+    </g>
+
+    <!-- 사용자 (EC2 → 사용자) -->
+    <line x1="880" y1="370" x2="700" y2="370" stroke="#667eea" stroke-width="2" marker-end="url(#arr)"/>
+    <g filter="url(#shadow)">
+      <rect x="500" y="340" width="200" height="60" rx="14" fill="url(#g1)"/>
+      <text x="600" y="367" text-anchor="middle" fill="white" font-weight="800" font-size="14">면접 사용자</text>
+      <text x="600" y="386" text-anchor="middle" fill="white" font-size="11" opacity="0.92">새 데이터로 즉시 응답</text>
+    </g>
+
+    <!-- 모니터링: 실패 시 SNS -->
+    <line x1="375" y1="130" x2="375" y2="345" stroke="#d69e2e" stroke-width="2" stroke-dasharray="4,4"/>
+    <g filter="url(#shadow)">
+      <rect x="280" y="345" width="190" height="60" rx="14" fill="#fefcbf"/>
+      <text x="375" y="370" text-anchor="middle" fill="#744210" font-weight="800" font-size="13">SNS (실패 알림)</text>
+      <text x="375" y="390" text-anchor="middle" fill="#744210" font-size="11">이메일 + CloudWatch Alarm</text>
+    </g>
+
+    <!-- 캡션 -->
+    <text x="20" y="450" fill="#718096" font-size="11">→ 실선: 정기 실행 흐름 (주1회)   ⋯ 점선: 비동기·외부 호출   ↓ 노란 점선: 모니터링</text>
+  </svg>
+</section>
+
+<!-- 5. EventBridge 스케줄 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">4</div><h2>EventBridge — 매주 일요일 새벽 트리거</h2></div>
+  <div class="grid-2">
+    <div>
+      <h3>Cron 표현식</h3>
+      <pre class="code"><span class="cmt"># UTC 17:00 토요일 = KST 02:00 일요일</span>
+ScheduleExpression: <span class="str">"cron(0 17 ? * SAT *)"</span>
+
+<span class="cmt"># 왜 새벽인가?</span>
+<span class="cmt">- 면접 트래픽 최저 (학습자 대부분 취침)</span>
+<span class="cmt">- 데이터 소스 응답성 최상 (네이버·DART 한산)</span>
+<span class="cmt">- Fargate Spot 가용성 ↑</span></pre>
+    </div>
+    <div>
+      <h3>왜 일요일인가?</h3>
+      <ul>
+        <li><strong>주간 단위 트렌드</strong>가 가장 안정적으로 정착되는 시점</li>
+        <li>월요일 면접 사용자에게 신선한 데이터 제공</li>
+        <li>주말 동안 누적된 공시·뉴스를 한 번에 흡수</li>
+        <li>실패 시 평일 영업 시간 내 복구 가능</li>
+      </ul>
+      <div class="callout" style="margin-top: 1.2rem">
+        <strong>DeadLetter Queue (SQS)</strong>: EventBridge가 Batch에 못 전달했을 때의 이벤트를 보관 — 재처리 가능.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. AWS Batch + Fargate Spot -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">5</div><h2>AWS Batch — Fargate Spot으로 운영비 70% 절감</h2></div>
+  <div class="grid-2">
+    <div>
+      <h3>Job Definition</h3>
+      <table>
+        <tr><th>항목</th><th>값</th></tr>
+        <tr><td>vCPU</td><td>1</td></tr>
+        <tr><td>Memory</td><td>2,048 MiB (2GB)</td></tr>
+        <tr><td>Platform</td><td>FARGATE</td></tr>
+        <tr><td>Network</td><td>AWS_VPC (public subnet)</td></tr>
+        <tr><td>Log driver</td><td>awslogs (/aws/batch/job)</td></tr>
+        <tr><td>Retry</td><td>2회 (지수 백오프)</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>왜 Fargate Spot?</h3>
+      <ul>
+        <li><strong>On-demand 대비 ~70% 할인</strong> ($0.04/vCPU-hr)</li>
+        <li>중단 가능성 있지만 우리 job은 멱등 + 재시도</li>
+        <li>EC2 인스턴스 직접 관리 부담 0</li>
+        <li>5분 후 자동 종료 — 자원 낭비 없음</li>
+      </ul>
+      <div class="callout" style="margin-top: 1.2rem">
+        <strong>Secrets Manager</strong>로 NAVER·DART 키 주입 → 컨테이너 env 변수에 평문 안 남김.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. 크롤러 컨테이너 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">6</div><h2>크롤러 컨테이너 — 3개 소스 + LLM 요약</h2></div>
+  <div class="grid-2">
+    <div>
+      <h3>데이터 파이프라인 (회사당 5초)</h3>
+      <ol style="padding-left: 1.2rem; margin-top: 0.6rem">
+        <li style="margin-bottom: 0.5rem"><strong>네이버 뉴스</strong> — 최근 7일, 상위 10건 raw text</li>
+        <li style="margin-bottom: 0.5rem"><strong>DART</strong> — 분기 보고서 사업 개요 + 손익</li>
+        <li style="margin-bottom: 0.5rem"><strong>채용 페이지</strong> — BeautifulSoup으로 인재상 섹션</li>
+        <li style="margin-bottom: 0.5rem"><strong>Bedrock Claude</strong> — 위 3개를 200~300자로 요약</li>
+        <li style="margin-bottom: 0.5rem"><strong>upsert_company_info()</strong> — DB에 한 번에 저장</li>
+      </ol>
+    </div>
+    <div>
+      <h3>Dockerfile 골자</h3>
+      <pre class="code"><span class="key">FROM</span> python:3.11-slim <span class="cmt">AS</span> base
+<span class="key">WORKDIR</span> /app
+<span class="key">COPY</span> requirements.txt .
+<span class="key">RUN</span> pip install --no-cache-dir -r requirements.txt
+<span class="key">COPY</span> backend/services/crawlers/ ./backend/services/crawlers/
+<span class="key">COPY</span> backend/services/bedrock_client.py ./backend/services/
+<span class="key">COPY</span> database.py scripts/ ./
+<span class="key">ENTRYPOINT</span> [<span class="str">"python"</span>, <span class="str">"scripts/crawl_companies.py"</span>]
+<span class="key">CMD</span> [<span class="str">"--companies"</span>, <span class="str">"삼성전자,SK하이닉스,DB하이텍,한미반도체,솔브레인"</span>,
+     <span class="str">"--output"</span>, <span class="str">"/tmp/companies.db"</span>,
+     <span class="str">"--upload-s3"</span>]</pre>
+    </div>
+  </div>
+</section>
+
+<!-- 8. IAM 분리 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">7</div><h2>IAM — 최소 권한 원칙으로 3개 Role 분리</h2></div>
+  <div class="grid-3">
+    <div class="card">
+      <h3>Batch Job Role</h3>
+      <p class="muted" style="font-size: 0.85rem">컨테이너 내부가 사용</p>
+      <ul style="margin-top: 0.8rem">
+        <li><span class="tag">bedrock:InvokeModel</span></li>
+        <li><span class="tag">s3:PutObject</span> (스냅샷 저장)</li>
+        <li><span class="tag">secretsmanager:GetSecretValue</span></li>
+        <li><span class="tag">logs:PutLogEvents</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Batch Execution Role</h3>
+      <p class="muted" style="font-size: 0.85rem">Fargate가 컨테이너 띄우기 위해 사용</p>
+      <ul style="margin-top: 0.8rem">
+        <li><span class="tag">ecr:GetAuthorizationToken</span></li>
+        <li><span class="tag">ecr:BatchGetImage</span></li>
+        <li><span class="tag">logs:CreateLogStream</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>EventBridge Role</h3>
+      <p class="muted" style="font-size: 0.85rem">스케줄러가 Batch submit 호출</p>
+      <ul style="margin-top: 0.8rem">
+        <li><span class="tag">batch:SubmitJob</span></li>
+        <li>대상: 특정 Job Queue ARN만</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout" style="margin-top: 1.5rem">
+    <strong>Defense in depth</strong> — 컨테이너가 털려도 외부 시스템 권한이 분리돼있어 피해 영역 한정. Secrets는 평문 노출 없이 SDK 호출 시점에만 메모리에.
+  </div>
+</section>
+
+<!-- 9. 비용 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">8</div><h2>비용 분석 — 월 $1.53 (LLM 빼면 $0.65)</h2></div>
+  <div class="grid-2">
+    <div>
+      <table>
+        <tr><th>항목</th><th class="right">월 비용</th></tr>
+        <tr><td>Fargate Spot (1 vCPU + 2GB × 5분/주 × 4회)</td><td class="right">$0.008</td></tr>
+        <tr><td>Bedrock Claude Haiku (요약 호출 100회/주)</td><td class="right">$0.88</td></tr>
+        <tr><td>S3 (100MB × 12개월 보관)</td><td class="right">$0.03</td></tr>
+        <tr><td>CloudWatch Logs (1MB/회 × 4회)</td><td class="right">$0.10</td></tr>
+        <tr><td>SNS 알림 (이메일 5건 가정)</td><td class="right">$0.00</td></tr>
+        <tr><td>EventBridge / Secrets Manager / ECR</td><td class="right">$0.40</td></tr>
+        <tr><td>NAT Gateway</td><td class="right"><span class="pill pill-ok">$0 (회피)</span></td></tr>
+        <tr class="total-row"><td>합계</td><td class="right">$1.53/월</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>비용 최적화 결정</h3>
+      <ul>
+        <li><strong>Public subnet + assignPublicIp</strong>으로 NAT Gateway($32/월) 회피</li>
+        <li><strong>Fargate Spot</strong>으로 컴퓨트 비용 70% 감축</li>
+        <li><strong>Haiku 모델 선택</strong> — 요약 품질 충분, Sonnet 대비 80% 저렴</li>
+        <li><strong>S3 스냅샷 보관</strong>은 1년만, IA Storage Class로 자동 전환</li>
+      </ul>
+      <div class="callout" style="margin-top: 1.2rem">
+        <strong>학생 크레딧</strong> $100이면 ~5.4년 운영 가능. 발표 시점 기준 비용 부담 사실상 0.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10. 모니터링 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">9</div><h2>모니터링 — 실패 시 즉시 알림 + 재처리</h2></div>
+  <div class="grid-2">
+    <div>
+      <h3>3중 안전망</h3>
+      <ul>
+        <li><strong>Job-level retry</strong>: Batch가 실패 시 2회 자동 재시도</li>
+        <li><strong>CloudWatch Logs</strong>: stdout/stderr 영구 보관, Insights 쿼리</li>
+        <li><strong>CloudWatch Alarm</strong>: 최근 7일 실패 ≥ 1회 → SNS</li>
+        <li><strong>SNS → 이메일</strong>: 운영자에게 실시간 통지</li>
+        <li><strong>EventBridge DLQ</strong>: 트리거 자체 실패도 보관</li>
+      </ul>
+    </div>
+    <div>
+      <h3>SLO·운영 지표</h3>
+      <table>
+        <tr><th>지표</th><th>목표</th></tr>
+        <tr><td>주간 성공률</td><td><span class="pill pill-ok">≥ 99%</span></td></tr>
+        <tr><td>완료 시간 (5개사)</td><td>≤ 7분</td></tr>
+        <tr><td>회사당 데이터 신선도</td><td>≤ 7일</td></tr>
+        <tr><td>실패 알림 latency</td><td>≤ 5분</td></tr>
+        <tr><td>인적 개입 빈도</td><td><span class="pill pill-ok">월 0회</span></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 11. 운영·로드맵 -->
+<section class="slide">
+  <div class="title-bar"><div class="num-circle">10</div><h2>로드맵 — 5개사에서 20개사로</h2></div>
+  <div class="grid-2">
+    <div>
+      <h3>현재 (이번 발표)</h3>
+      <ul>
+        <li>✅ 크롤러 PoC (20 tests pass)</li>
+        <li>✅ Bedrock 요약 통합</li>
+        <li>✅ AWS Batch 인프라 코드 (JSON 10 + bash 3)</li>
+        <li>✅ deploy.sh 한 줄 배포</li>
+        <li>✅ 비용 모니터링 + SNS 알림</li>
+        <li>⏳ <strong>5개사 자동 갱신 운영 중</strong></li>
+      </ul>
+    </div>
+    <div>
+      <h3>다음 (발표 직전 → 발표 후)</h3>
+      <ul>
+        <li>📈 캐시 회사 20개사로 확장 (LG이노텍·리노공업·이오테크닉스 등)</li>
+        <li>🗂️ RDS PostgreSQL 이전 (SQLite 한계 극복)</li>
+        <li>🔍 채용 페이지 SPA 대응 (Playwright 헤드리스)</li>
+        <li>🌍 Cross-region failover (us-east-1 → us-west-2)</li>
+        <li>📊 Grafana 대시보드 (운영자 시연용)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout" style="margin-top: 1.5rem">
+    <strong>핵심 메시지</strong>: 학생 프로젝트 수준에서 <strong>월 $1.53로 실서비스급 자동화 파이프라인</strong>을 구현. AWS 강의에서 배운 EventBridge·Batch·Bedrock·S3·CloudWatch·SNS·IAM·Secrets Manager 8개 서비스를 실제로 묶었다.
+  </div>
+</section>
+
+<!-- 12. 마무리 -->
+<section class="slide hero">
+  <div class="badge">감사합니다</div>
+  <h1>질문<br>받습니다 🙋</h1>
+  <p class="sub">Go터뷰 · 반도체 산업 특화 AI 면접 연습 서비스</p>
+  <div class="meta">
+    <div>http://34.230.17.176:8501</div>
+    <div>github.com/gofactory0509/gofactory-</div>
+  </div>
+</section>
+
+</main>
+
+<nav class="nav">
+  <button id="prev" title="이전">‹</button>
+  <span class="counter" id="counter">1 / 12</span>
+  <button id="next" title="다음">›</button>
+</nav>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const counter = document.getElementById('counter');
+const progress = document.getElementById('progress');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const hint = document.getElementById('hint');
+let idx = 0;
+
+function show(n) {
+  idx = Math.max(0, Math.min(slides.length - 1, n));
+  slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+  counter.textContent = `${idx + 1} / ${slides.length}`;
+  progress.style.width = `${((idx + 1) / slides.length) * 100}%`;
+  prevBtn.disabled = idx === 0;
+  nextBtn.disabled = idx === slides.length - 1;
+  history.replaceState(null, '', `#${idx + 1}`);
+}
+
+prevBtn.addEventListener('click', () => show(idx - 1));
+nextBtn.addEventListener('click', () => show(idx + 1));
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(idx + 1); }
+  else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(idx - 1); }
+  else if (e.key === 'Home') show(0);
+  else if (e.key === 'End') show(slides.length - 1);
+});
+
+// Initial hint
+setTimeout(() => hint.classList.add('show'), 600);
+setTimeout(() => hint.classList.remove('show'), 4500);
+
+// Deep link
+const start = parseInt(location.hash.replace('#', ''), 10);
+show(isNaN(start) ? 0 : start - 1);
+</script>
+</body>
+</html>
