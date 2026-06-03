@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
-from backend.routers import health, interview, records
+from backend.routers import byok, health, interview, records
 from backend.services.database import DatabaseService
 
 
@@ -29,12 +29,16 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # 프론트엔드 JS가 X-Backend-Used 응답 헤더를 읽을 수 있도록 노출
+        expose_headers=["X-Backend-Used"],
     )
 
     # 라우터 등록 (/api 프리픽스)
     app.include_router(health.router, prefix="/api", tags=["health"])
     app.include_router(interview.router, prefix="/api", tags=["interview"])
     app.include_router(records.router, prefix="/api", tags=["records"])
+    # BYOK 라우터는 자체적으로 /byok prefix를 가지므로 여기서는 /api만 부여
+    app.include_router(byok.router, prefix="/api")
 
     # 글로벌 예외 핸들러: 일관된 {"detail": "..."} 에러 형식
     @app.exception_handler(Exception)

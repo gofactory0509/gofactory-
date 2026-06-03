@@ -22,10 +22,36 @@
 
 
     <!-- Navigation -->
-    <nav class="flex gap-2 mx-4 mt-4">
+    <nav class="flex gap-2 mx-4 mt-4 items-center">
         <button id="nav-home" class="nav-btn active px-4 py-2 rounded-lg text-sm font-medium transition-colors">홈</button>
         <button id="nav-records" class="nav-btn px-4 py-2 rounded-lg text-sm font-medium transition-colors">기록/통계</button>
+        <span id="backend-badge" class="backend-badge backend-badge-bedrock" title="현재 사용 중인 LLM 백엔드">📡 Bedrock</span>
     </nav>
+
+    <!-- BYOK Panel (사이드바 대용 collapsible) -->
+    <section id="byok-section" class="byok-section mx-4 mt-3">
+        <details>
+            <summary>🔑 API 키 설정 (선택)</summary>
+            <p class="byok-hint">키 없이도 무료로 사용할 수 있어요. 본인 OpenRouter 키 사용 시 GPT/Claude/Gemini 등 모델을 자유롭게 선택할 수 있습니다.</p>
+            <label for="byok-key" class="byok-label">OpenRouter API 키</label>
+            <input type="password" id="byok-key" placeholder="sk-or-v1-..." autocomplete="off" spellcheck="false">
+            <label for="byok-model" class="byok-label">모델 선택</label>
+            <select id="byok-model"></select>
+            <div class="byok-actions">
+                <button id="byok-validate" type="button">키 검증</button>
+                <button id="byok-clear" type="button" class="byok-secondary">지우기</button>
+            </div>
+            <label class="byok-remember">
+                <input type="checkbox" id="byok-remember">
+                이 브라우저에 키 저장 (localStorage)
+            </label>
+            <div id="byok-status" class="byok-status" role="status" aria-live="polite"></div>
+            <p class="byok-fineprint">
+                ⚠️ 키는 서버를 거치지만 저장되지 않습니다. 키 발급은
+                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a> 에서.
+            </p>
+        </details>
+    </section>
 
     <!-- Main View Container -->
     <main id="app" class="mx-4 mt-4 pb-8"></main>

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Go터뷰 챗봇 메인 애플리케이션."""
 
 import base64
@@ -220,8 +220,55 @@ MOTIVATION_MESSAGES = [
 ]
 
 
-def get_ai_client(config: ConfigManager) -> AIClient:
-    """Gemini + Groq 백업으로 AIClient 생성."""
+class _ByokAwareClient:
+    """BYOK 우선 + AIClient 폴백 어댑터.
+
+    Streamlit 측에서 ``get_ai_client()`` 가 반환하는 객체. 호출자 코드를 바꾸지
+    않고도 다음 동작을 보장한다:
+
+    - 세션에 OpenRouter 키가 있으면 :meth:`generate_question`/
+      :meth:`evaluate_answer` 는 :class:`backend.services.llm_router.LLMRouter`
+      로 라우팅 (Bedrock 또는 OpenRouter).
+    - 키가 없거나 기타 메서드(``transcribe_audio``, ``generate_targeted_question``
+      등)는 기존 AIClient(Gemini/Groq) 에 위임 — backward compatible.
+
+    LLMRouter 와 AIClient 의 ``generate_question`` 시그니처가 호환되도록
+    LLMRouter 측을 보강했으므로 직접 위임이 가능하다.
+    """
+
+    def __init__(self, primary: AIClient, router: "LLMRouter | None"):
+        self._primary = primary
+        self._router = router
+
+    # 위임이 필요한 두 메서드만 LLMRouter 경로로 분기
+    def generate_question(self, *args, **kwargs):
+        if self._router is not None:
+            return self._router.generate_question(*args, **kwargs)
+        return self._primary.generate_question(*args, **kwargs)
+
+    def evaluate_answer(self, *args, **kwargs):
+        if self._router is not None:
+            return self._router.evaluate_answer(*args, **kwargs)
+        return self._primary.evaluate_answer(*args, **kwargs)
+
+    def backend_name(self) -> str:
+        """현재 어떤 백엔드로 라우팅 중인지."""
+        if self._router is not None:
+            return self._router.backend_name()
+        return "gemini"  # legacy AIClient (Gemini + Groq fallback)
+
+    # 그 외 모든 속성/메서드는 primary(AIClient)로 위임 — backward compat
+    def __getattr__(self, name):
+        return getattr(self._primary, name)
+
+
+def get_ai_client(config: ConfigManager):
+    """AI 클라이언트 팩토리 (BYOK 인지 어댑터 반환).
+
+    세션에 OpenRouter 키가 있으면 LLMRouter 우선, 없으면 기존 Gemini+Groq.
+    어떤 경우든 같은 인터페이스(generate_question / evaluate_answer / ...) 를
+    제공한다.
+    """
     gemini_key = config.get_api_key()
     groq_key = os.environ.get("GROQ_API_KEY", "")
     if not groq_key:
@@ -229,7 +276,22 @@ def get_ai_client(config: ConfigManager) -> AIClient:
             groq_key = st.secrets.get("GROQ_API_KEY", "")
         except Exception:
             groq_key = ""
-    return AIClient(gemini_key=gemini_key, groq_key=groq_key)
+
+    primary = AIClient(gemini_key=gemini_key, groq_key=groq_key)
+
+    # BYOK 세션 상태 확인
+    or_key = st.session_state.get("openrouter_key", "") or ""
+    or_model = st.session_state.get("openrouter_model", "") or ""
+
+    router = None
+    if or_key:
+        try:
+            from backend.services.llm_router import LLMRouter
+            router = LLMRouter(user_openrouter_key=or_key, user_model=or_model or None)
+        except Exception:
+            router = None  # 라우터 초기화 실패 시 기존 흐름 유지
+
+    return _ByokAwareClient(primary, router)
 
 
 def init_session_state():
@@ -248,6 +310,9 @@ def init_session_state():
         "show_feedback_form": False,
         "show_data_dashboard": False,
         "show_weakness_page": False,
+        # BYOK: 사용자 OpenRouter 키/모델 (세션 한정 — 종료 시 사라짐)
+        "openrouter_key": "",
+        "openrouter_model": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -260,6 +325,83 @@ def get_daily_quote() -> str:
     seed = today.year * 10000 + today.month * 100 + today.day
     rng = random.Random(seed)
     return rng.choice(DAILY_QUOTES)
+
+
+def _render_byok_sidebar() -> None:
+    """OpenRouter BYOK 입력 섹션을 사이드바에 렌더한다.
+
+    세션 상태:
+        - ``st.session_state["openrouter_key"]`` : 입력된 키 (없으면 빈 문자열)
+        - ``st.session_state["openrouter_model"]`` : 선택된 모델 ID
+        - ``st.session_state["openrouter_validated"]`` : 검증 결과 dict (옵션)
+
+    이 함수는 키 원문을 UI에 다시 노출하지 않는다 (type="password").
+    검증 시에만 :func:`backend.services.key_validator.validate_openrouter_key`
+    를 호출하고, 응답에는 마스킹된 미리보기만 포함한다.
+    """
+    from backend.services.key_validator import validate_openrouter_key, mask_key
+    from backend.services.openrouter_client import DEFAULT_MODEL, SUPPORTED_MODELS
+
+    with st.expander("🔑 OpenRouter API 키 (선택)", expanded=False):
+        st.caption(
+            "키 없이도 무료 사용 가능. 본인 키 사용 시 GPT/Claude/Gemini 등 모델을 자유롭게 선택할 수 있습니다."
+        )
+        or_key = st.text_input(
+            "API 키",
+            value=st.session_state.get("openrouter_key", "") or "",
+            type="password",
+            placeholder="sk-or-v1-...",
+            help="없으면 서비스 기본 백엔드 사용. 본인 키 입력 시 모델 선택 가능.",
+            key="byok_key_input",
+        )
+        # 세션에 즉시 반영 (입력 변경 시)
+        st.session_state["openrouter_key"] = (or_key or "").strip()
+
+        if st.session_state["openrouter_key"]:
+            model_ids = list(SUPPORTED_MODELS.keys())
+            default_idx = model_ids.index(DEFAULT_MODEL) if DEFAULT_MODEL in model_ids else 0
+            current_model = st.session_state.get("openrouter_model") or DEFAULT_MODEL
+            if current_model in model_ids:
+                default_idx = model_ids.index(current_model)
+            chosen = st.selectbox(
+                "모델",
+                model_ids,
+                index=default_idx,
+                format_func=lambda m: SUPPORTED_MODELS[m],
+                key="byok_model_select",
+            )
+            st.session_state["openrouter_model"] = chosen
+
+            if st.button("키 검증", key="byok_validate_btn", use_container_width=True):
+                with st.spinner("OpenRouter 키를 검증 중..."):
+                    result = validate_openrouter_key(st.session_state["openrouter_key"])
+                st.session_state["openrouter_validated"] = result
+                if result.get("valid"):
+                    parts = ["✅ 키 유효"]
+                    if result.get("label"):
+                        parts.append(f"라벨: {result['label']}")
+                    if result.get("credit_left") is not None:
+                        parts.append(f"잔액: ${result['credit_left']:.2f}")
+                    if result.get("models_count") is not None:
+                        parts.append(f"모델: {result['models_count']}개")
+                    parts.append(f"({mask_key(st.session_state['openrouter_key'])})")
+                    st.success(" · ".join(parts))
+                else:
+                    st.error(f"❌ {result.get('error', '검증 실패')}")
+        else:
+            st.session_state["openrouter_model"] = ""
+            st.session_state.pop("openrouter_validated", None)
+
+        st.caption(
+            "⚠️ 키는 서버를 거치지만 저장되지 않습니다. "
+            "[openrouter.ai/keys](https://openrouter.ai/keys) 에서 발급."
+        )
+
+        # 현재 사용 백엔드 배지
+        if st.session_state.get("openrouter_key"):
+            st.caption("📍 현재 백엔드: 🔑 OpenRouter")
+        else:
+            st.caption("📍 현재 백엔드: 📡 Bedrock / Gemini (기본)")
 
 
 def render_sidebar(config: ConfigManager, db: InterviewDB):
@@ -275,6 +417,9 @@ def render_sidebar(config: ConfigManager, db: InterviewDB):
             if api_key_input and api_key_input.strip():
                 config.set_api_key(api_key_input.strip())
                 st.rerun()
+
+        # BYOK 섹션 (Gemini 키 위에 collapsible)
+        _render_byok_sidebar()
 
         st.subheader("직무 선택")
         selected_job = st.selectbox(

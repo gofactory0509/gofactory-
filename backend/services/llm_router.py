@@ -12,8 +12,14 @@
 from __future__ import annotations
 
 import random
+from typing import Any
 
 from backend.services.bedrock_client import BedrockClient
+from backend.services.key_validator import (
+    is_well_formed,
+    mask_key,
+    validate_openrouter_key,
+)
 from backend.services.openrouter_client import OpenRouterClient
 
 
@@ -30,7 +36,10 @@ class LLMRouter:
         user_openrouter_key: str | None = None,
         user_model: str | None = None,
     ):
-        self.user_key = (user_openrouter_key or "").strip() or None
+        raw = (user_openrouter_key or "").strip() or None
+        # 형식이 틀린 키는 처음부터 무시 — Bedrock으로 자동 폴백.
+        # OpenRouterClient가 ValueError를 던지기 전에 미리 차단해 UX 보호.
+        self.user_key = raw if (raw and is_well_formed(raw)) else None
         self.user_model = user_model
 
     # ─── 백엔드 선택 ───
@@ -43,6 +52,38 @@ class LLMRouter:
 
     def backend_name(self) -> str:
         return "openrouter" if self.user_key else "bedrock"
+
+    def key_preview(self) -> str:
+        """로그/디버그용 마스킹된 키 미리보기. 키 없으면 ``"(none)"``."""
+        return mask_key(self.user_key)
+
+    # ─── 키 검증 (런타임에 OpenRouter /auth/key 호출) ───
+
+    def validate_user_key(self) -> dict[str, Any]:
+        """현재 라우터가 보유한 OpenRouter 키 검증.
+
+        키가 없으면 valid=False + error="키 없음" 반환.
+
+        Returns:
+            :func:`backend.services.key_validator.validate_openrouter_key` 와
+            동일한 dict 스키마.
+        """
+        if not self.user_key:
+            return {
+                "valid": False,
+                "label": None,
+                "credit_left": None,
+                "models_count": None,
+                "error": "OpenRouter 키가 제공되지 않았습니다.",
+            }
+        return validate_openrouter_key(self.user_key)
+
+    # ─── 헬퍼 (외부에서도 호출 가능) ───
+
+    @staticmethod
+    def is_well_formed_key(api_key: str | None) -> bool:
+        """OpenRouter 키 형식 정합성 (네트워크 호출 없음)."""
+        return is_well_formed(api_key)
 
     # ─── 면접 도메인 메서드 (기존 AIService 시그니처와 호환) ───
 
