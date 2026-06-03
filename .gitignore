@@ -5,3 +5,8 @@ __pycache__/
 # Streamlit: config.toml은 추적(테마 강제), 자격증명만 ignore
 .streamlit/credentials.toml
 .streamlit/secrets.toml
+
+# 런타임 SQLite — 면접 세션 데이터, 코드와 분리 (interviews.db 등)
+*.db
+*.sqlite
+*.sqlite3
