@@ -19,6 +19,11 @@ boto3>=1.36.0                   # Bedrock IAM 인증 (EC2 Role 자동 주입)
 streamlit
 streamlit-mic-recorder
 
+# --- Company Info Crawler (Phase 2 PoC) ---
+beautifulsoup4>=4.12
+lxml>=5.0
+# requests: openai SDK가 transitive로 가져옴, 명시 추가는 생략
+
 # --- Testing ---
 pytest==7.4.4
 httpx==0.27.0
