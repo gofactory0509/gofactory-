@@ -22,13 +22,19 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     groq_api_key: str = ""
     database_path: str = "interviews.db"
-    allowed_origins: list[str] = ["http://localhost:8000"]
+    allowed_origins: list[str] = ["http://localhost:8000", "*"]
     host: str = "0.0.0.0"
     port: int = 8000
+
+    # Bedrock 라우터 측이 직접 환경변수에서 읽으므로 Settings에는 미선언이지만
+    # 동일 .env 파일을 공유하므로 extra=ignore로 거부 방지.
+    aws_region: str = "us-east-1"
+    bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 settings = Settings()
