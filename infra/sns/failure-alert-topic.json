@@ -1,0 +1,28 @@
+{
+  "TopicName": "gofactory-crawler-failures",
+  "DisplayName": "Go터뷰 크롤러 실패 알림",
+  "Tags": [
+    { "Key": "Project", "Value": "gofactory-v3" },
+    { "Key": "Component", "Value": "crawler" },
+    { "Key": "ManagedBy", "Value": "deploy.sh" }
+  ],
+  "Attributes": {
+    "DisplayName": "Go터뷰 크롤러 실패 알림"
+  },
+  "CloudWatchAlarm": {
+    "AlarmName": "gofactory-crawler-job-failures-7d",
+    "AlarmDescription": "최근 7일 내 Batch 크롤러 잡 실패 1회 이상",
+    "Namespace": "AWS/Batch",
+    "MetricName": "FailedJobs",
+    "Statistic": "Sum",
+    "Period": 604800,
+    "EvaluationPeriods": 1,
+    "Threshold": 1,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "Dimensions": [
+      { "Name": "JobQueue", "Value": "gofactory-crawler-queue" }
+    ]
+  },
+  "DefaultSubscriptionEmail": "kimseng070824@gmail.com"
+}

@@ -1,0 +1,82 @@
+{
+  "jobDefinitionName": "gofactory-crawler-job",
+  "type": "container",
+  "platformCapabilities": ["FARGATE"],
+  "propagateTags": true,
+  "containerProperties": {
+    "image": "REPLACE_WITH_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/gofactory-crawler:latest",
+    "command": [
+      "--companies",
+      "삼성전자,SK하이닉스,DB하이텍,한미반도체,솔브레인",
+      "--output",
+      "/tmp/companies.db",
+      "--upload-s3"
+    ],
+    "jobRoleArn": "arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/gofactory-batch-job-role",
+    "executionRoleArn": "arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/gofactory-batch-execution-role",
+    "resourceRequirements": [
+      { "type": "VCPU", "value": "1" },
+      { "type": "MEMORY", "value": "2048" }
+    ],
+    "networkConfiguration": {
+      "assignPublicIp": "ENABLED"
+    },
+    "fargatePlatformConfiguration": {
+      "platformVersion": "LATEST"
+    },
+    "runtimePlatform": {
+      "operatingSystemFamily": "LINUX",
+      "cpuArchitecture": "X86_64"
+    },
+    "environment": [
+      { "name": "AWS_REGION", "value": "us-east-1" },
+      { "name": "BEDROCK_MODEL_ID", "value": "anthropic.claude-sonnet-4-6-20251015-v1:0" },
+      { "name": "S3_BUCKET", "value": "gofactory-companies" },
+      { "name": "OUTPUT_DB_PATH", "value": "/tmp/companies.db" },
+      { "name": "LOG_LEVEL", "value": "INFO" }
+    ],
+    "secrets": [
+      {
+        "name": "NAVER_CLIENT_ID",
+        "valueFrom": "arn:aws:secretsmanager:us-east-1:REPLACE_WITH_ACCOUNT_ID:secret:gofactory/crawler/api-keys:NAVER_CLIENT_ID::"
+      },
+      {
+        "name": "NAVER_CLIENT_SECRET",
+        "valueFrom": "arn:aws:secretsmanager:us-east-1:REPLACE_WITH_ACCOUNT_ID:secret:gofactory/crawler/api-keys:NAVER_CLIENT_SECRET::"
+      },
+      {
+        "name": "DART_API_KEY",
+        "valueFrom": "arn:aws:secretsmanager:us-east-1:REPLACE_WITH_ACCOUNT_ID:secret:gofactory/crawler/api-keys:DART_API_KEY::"
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/aws/batch/job",
+        "awslogs-region": "us-east-1",
+        "awslogs-stream-prefix": "gofactory-crawler"
+      }
+    }
+  },
+  "retryStrategy": {
+    "attempts": 2,
+    "evaluateOnExit": [
+      {
+        "action": "RETRY",
+        "onStatusReason": "Task failed to start"
+      },
+      {
+        "action": "EXIT",
+        "onReason": "*"
+      }
+    ]
+  },
+  "timeout": {
+    "attemptDurationSeconds": 1800
+  },
+  "tags": {
+    "Project": "gofactory-v3",
+    "Component": "crawler",
+    "ManagedBy": "deploy.sh"
+  }
+}

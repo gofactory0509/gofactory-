@@ -1,0 +1,11 @@
+{
+  "Name": "gofactory-crawler-weekly",
+  "Description": "Go터뷰 회사 크롤러를 매주 일요일 02:00 KST (= UTC 17:00 토)에 실행",
+  "ScheduleExpression": "cron(0 17 ? * SAT *)",
+  "State": "ENABLED",
+  "Tags": [
+    { "Key": "Project", "Value": "gofactory-v3" },
+    { "Key": "Component", "Value": "crawler" },
+    { "Key": "ManagedBy", "Value": "deploy.sh" }
+  ]
+}

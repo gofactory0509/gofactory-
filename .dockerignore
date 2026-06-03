@@ -1,0 +1,81 @@
+# =============================================================================
+# Docker 빌드 컨텍스트 제외 (이미지 슬림화 + 보안)
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 가상환경
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 로컬 데이터 / 비밀
+*.db
+*.sqlite
+*.sqlite3
+*.env
+.env*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# 문서/기획 자산 (컨테이너 불필요)
+*.md
+!scripts/README.md
+*.docx
+*.pdf
+*.pptx
+*.xlsx
+assets/
+frontend/
+speech/
+
+# Streamlit
+.streamlit/
+
+# 테스트
+tests/
+test_*.py
+*_test.py
+
+# 빌드 산출물
+build/
+dist/
+*.tar.gz
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 인프라 (이미지 안에 들어갈 필요 없음)
+infra/
+Dockerfile
+.dockerignore
+
+# 로그
+*.log
+logs/

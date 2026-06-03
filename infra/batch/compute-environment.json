@@ -1,0 +1,23 @@
+{
+  "computeEnvironmentName": "gofactory-crawler-ce",
+  "type": "MANAGED",
+  "state": "ENABLED",
+  "computeResources": {
+    "type": "FARGATE_SPOT",
+    "maxvCpus": 4,
+    "subnets": [
+      "REPLACE_WITH_SUBNET_ID_1",
+      "REPLACE_WITH_SUBNET_ID_2"
+    ],
+    "securityGroupIds": [
+      "REPLACE_WITH_SECURITY_GROUP_ID"
+    ]
+  },
+  "serviceRole": "arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/AWSServiceRoleForBatch",
+  "tags": {
+    "Project": "gofactory-v3",
+    "Component": "crawler",
+    "Environment": "prod",
+    "ManagedBy": "deploy.sh"
+  }
+}

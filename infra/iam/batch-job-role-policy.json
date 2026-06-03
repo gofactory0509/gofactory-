@@ -1,0 +1,55 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInvokeClaudeSonnet46",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6-*",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6-20251015-v1:0"
+      ]
+    },
+    {
+      "Sid": "S3PutSnapshotsOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::gofactory-companies/*"
+    },
+    {
+      "Sid": "S3ListOwnBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::gofactory-companies"
+    },
+    {
+      "Sid": "SecretsManagerReadCrawlerApiKeys",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": "arn:aws:secretsmanager:us-east-1:REPLACE_WITH_ACCOUNT_ID:secret:gofactory/crawler/api-keys-*"
+    },
+    {
+      "Sid": "CloudWatchLogsWrite",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:REPLACE_WITH_ACCOUNT_ID:log-group:/aws/batch/job:*"
+    }
+  ]
+}

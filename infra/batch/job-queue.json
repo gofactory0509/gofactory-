@@ -1,0 +1,16 @@
+{
+  "jobQueueName": "gofactory-crawler-queue",
+  "state": "ENABLED",
+  "priority": 1,
+  "computeEnvironmentOrder": [
+    {
+      "order": 1,
+      "computeEnvironment": "gofactory-crawler-ce"
+    }
+  ],
+  "tags": {
+    "Project": "gofactory-v3",
+    "Component": "crawler",
+    "ManagedBy": "deploy.sh"
+  }
+}

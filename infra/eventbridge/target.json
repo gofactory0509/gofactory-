@@ -1,0 +1,24 @@
+{
+  "Rule": "gofactory-crawler-weekly",
+  "Targets": [
+    {
+      "Id": "gofactory-crawler-batch-target",
+      "Arn": "arn:aws:batch:us-east-1:REPLACE_WITH_ACCOUNT_ID:job-queue/gofactory-crawler-queue",
+      "RoleArn": "arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/gofactory-eventbridge-batch-role",
+      "BatchParameters": {
+        "JobDefinition": "arn:aws:batch:us-east-1:REPLACE_WITH_ACCOUNT_ID:job-definition/gofactory-crawler-job",
+        "JobName": "gofactory-crawler-scheduled",
+        "RetryStrategy": {
+          "Attempts": 2
+        }
+      },
+      "DeadLetterConfig": {
+        "Arn": "arn:aws:sqs:us-east-1:REPLACE_WITH_ACCOUNT_ID:gofactory-crawler-dlq"
+      },
+      "RetryPolicy": {
+        "MaximumRetryAttempts": 3,
+        "MaximumEventAgeInSeconds": 3600
+      }
+    }
+  ]
+}
