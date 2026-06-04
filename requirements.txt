@@ -10,9 +10,9 @@ pydantic-settings==2.6.1
 python-dotenv==0.21.0
 
 # --- AI Providers ---
-google-generativeai==0.8.6
-openai==2.37.0
-anthropic[bedrock]>=0.46.0      # AWS Bedrock (Sonnet 4.6 기본) + Anthropic 공식 SDK
+# v4: OpenRouter(BYOK) 제거. Bedrock 단일 + MCP 서버로 사용자 측 LLM 일원화.
+google-generativeai==0.8.6      # legacy: 음성 전사 등 멀티모달 폴백 (Streamlit 폐기 시 제거 예정)
+anthropic[bedrock]>=0.46.0      # AWS Bedrock + Anthropic 공식 SDK
 boto3>=1.36.0                   # Bedrock IAM 인증 (EC2 Role 자동 주입)
 
 # --- Streamlit Frontend (legacy / 점진적 마이그레이션 중) ---

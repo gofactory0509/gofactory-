@@ -2,18 +2,14 @@
 """Interview 라우터 모듈.
 
 면접 질문 생성, 답변 평가, 오늘의 명언 엔드포인트를 제공한다.
-
-BYOK 통합:
-    각 엔드포인트는 헤더 ``X-OpenRouter-Key`` 와 ``X-LLM-Model`` 을 받아
-    :class:`LLMRouter` 의존성을 빌드한다. 키가 있으면 OpenRouter, 없으면
-    AWS Bedrock 으로 자동 라우팅된다. 사용된 백엔드는 응답 헤더
-    ``X-Backend-Used`` 로 클라이언트에 통지된다.
+v4부터는 백엔드가 AWS Bedrock 단일 — 사용자 키 입력 경로 제거.
+사용자 측 LLM 활용은 ``/mcp`` MCP 서버 경로로 일원화.
 """
 
 import random
 from datetime import date
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from backend.models import (
     EvaluationRequest,
@@ -28,20 +24,9 @@ from backend.services.llm_router import LLMRouter
 router = APIRouter()
 
 
-def _build_router(
-    x_openrouter_key: str | None = Header(None, alias="X-OpenRouter-Key"),
-    x_llm_model: str | None = Header(None, alias="X-LLM-Model"),
-) -> LLMRouter:
-    """요청 헤더에서 BYOK 정보를 추출해 :class:`LLMRouter` 인스턴스를 만든다.
-
-    Args:
-        x_openrouter_key: ``X-OpenRouter-Key`` 헤더 값 (없으면 None → Bedrock).
-        x_llm_model: ``X-LLM-Model`` 헤더 값 (없으면 OpenRouter 기본 모델).
-
-    Returns:
-        라우팅 정책이 적용된 :class:`LLMRouter`.
-    """
-    return LLMRouter(user_openrouter_key=x_openrouter_key, user_model=x_llm_model)
+def _build_router() -> LLMRouter:
+    """Bedrock 단일 백엔드 LLMRouter 인스턴스를 반환한다."""
+    return LLMRouter()
 
 
 # 오늘의 명언 (취업 준비생을 위한 동기부여 명언 30+)

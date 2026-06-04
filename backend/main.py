@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
-from backend.routers import byok, health, interview, records
+from backend.routers import health, interview, records
 from backend.services.database import DatabaseService
 
 # MCP 서버 (Claude Desktop 등 외부 LLM 클라이언트가 사용자 구독으로 호출)
@@ -60,8 +60,6 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api", tags=["health"])
     app.include_router(interview.router, prefix="/api", tags=["interview"])
     app.include_router(records.router, prefix="/api", tags=["records"])
-    # BYOK 라우터는 자체적으로 /byok prefix를 가지므로 여기서는 /api만 부여
-    app.include_router(byok.router, prefix="/api")
 
     # MCP 서버 마운트 (/mcp) — 정적 파일(/) 마운트보다 먼저 와야 함
     if _mcp_app is not None:

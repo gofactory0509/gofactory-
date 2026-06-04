@@ -92,13 +92,13 @@ Claude는 자동으로:
 
 ## 5. 왜 MCP인가?
 
-| 비교 항목 | 기존 BYOK (OpenRouter 키) | **MCP (이 가이드)** |
+| 비교 항목 | 우리 기본 (Bedrock Haiku) | **MCP (Claude Pro 활용)** |
 |---|---|---|
-| 사용자 진입 | OpenRouter 가입 → 결제 카드 → 키 발급 | Claude Desktop 설정 1줄 |
-| 추가 결제 | 사용량별 종량제 | **0** (정액 구독 활용) |
-| 우리 인프라 비용 | LLM 호출 대행으로 발생 | **0** (LLM은 사용자 측에서) |
-| UI | Go터뷰 자체 웹 | Claude Desktop 채팅창 |
-| 모바일 | ✅ | Claude 모바일 앱 MCP 지원 시점 후 |
+| 사용자 진입 | 그냥 우리 웹 사용 | Claude Desktop 설정 1줄 |
+| 추가 결제 | 0 (월 30라운드 무료 한도) | **0** (이미 결제 중인 Claude Pro 정액) |
+| 한도 | 무료 30 / 프리미엄 정액 | 무제한 (Claude Pro quota 안에서) |
+| 우리 인프라 비용 | 사용자당 ~$0.09/월 | **0** (LLM은 사용자 측에서 호출) |
+| LLM 품질 | Haiku 3 / 프리미엄은 Sonnet 4.6 | Claude Pro의 Sonnet 4.6 / Opus 4.7 |
 
 ---
 

@@ -290,10 +290,10 @@ class _ByokAwareClient:
 
 
 def get_ai_client(config: ConfigManager):
-    """AI 클라이언트 팩토리 (BYOK 인지 어댑터 반환).
+    """AI 클라이언트 팩토리.
 
-    기본은 LLMRouter — BYOK OpenRouter 키 있으면 OpenRouter, 없으면 Bedrock Haiku.
-    Gemini/Groq는 ``transcribe_audio`` 등 legacy 메서드 폴백용으로만 유지.
+    v4: 모든 LLM 호출은 Bedrock 단일 백엔드(LLMRouter).
+    Gemini/Groq는 transcribe_audio 등 legacy 멀티모달 폴백용으로만 유지.
     """
     gemini_key = config.get_api_key()
     groq_key = os.environ.get("GROQ_API_KEY", "")
@@ -304,22 +304,11 @@ def get_ai_client(config: ConfigManager):
             groq_key = ""
 
     primary = AIClient(gemini_key=gemini_key, groq_key=groq_key)
-
-    or_key = (st.session_state.get("openrouter_key", "") or "").strip()
-    or_model = (st.session_state.get("openrouter_model", "") or "").strip()
-
-    # LLMRouter는 키가 비어 있어도 Bedrock으로 자동 폴백 — 항상 만든다.
-    # 라우터 초기화 자체가 실패할 때만 primary(Gemini/Groq) 로 떨어진다.
-    router = None
     try:
         from backend.services.llm_router import LLMRouter
-        router = LLMRouter(
-            user_openrouter_key=or_key or None,
-            user_model=or_model or None,
-        )
+        router = LLMRouter()
     except Exception:
         router = None
-
     return _ByokAwareClient(primary, router)
 
 
@@ -339,9 +328,6 @@ def init_session_state():
         "show_feedback_form": False,
         "show_data_dashboard": False,
         "show_weakness_page": False,
-        # BYOK: 사용자 OpenRouter 키/모델 (세션 한정 — 종료 시 사라짐)
-        "openrouter_key": "",
-        "openrouter_model": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -356,90 +342,10 @@ def get_daily_quote() -> str:
     return rng.choice(DAILY_QUOTES)
 
 
-def _render_byok_sidebar() -> None:
-    """OpenRouter BYOK 입력 섹션을 사이드바에 렌더한다.
-
-    세션 상태:
-        - ``st.session_state["openrouter_key"]`` : 입력된 키 (없으면 빈 문자열)
-        - ``st.session_state["openrouter_model"]`` : 선택된 모델 ID
-        - ``st.session_state["openrouter_validated"]`` : 검증 결과 dict (옵션)
-
-    이 함수는 키 원문을 UI에 다시 노출하지 않는다 (type="password").
-    검증 시에만 :func:`backend.services.key_validator.validate_openrouter_key`
-    를 호출하고, 응답에는 마스킹된 미리보기만 포함한다.
-    """
-    from backend.services.key_validator import validate_openrouter_key, mask_key
-    from backend.services.openrouter_client import DEFAULT_MODEL, SUPPORTED_MODELS
-
-    with st.expander("🔑 OpenRouter API 키 (선택)", expanded=False):
-        st.caption(
-            "키 없이도 무료 사용 가능. 본인 키 사용 시 GPT/Claude/Gemini 등 모델을 자유롭게 선택할 수 있습니다."
-        )
-        or_key = st.text_input(
-            "API 키",
-            value=st.session_state.get("openrouter_key", "") or "",
-            type="password",
-            placeholder="sk-or-v1-...",
-            help="없으면 서비스 기본 백엔드 사용. 본인 키 입력 시 모델 선택 가능.",
-            key="byok_key_input",
-        )
-        # 세션에 즉시 반영 (입력 변경 시)
-        st.session_state["openrouter_key"] = (or_key or "").strip()
-
-        if st.session_state["openrouter_key"]:
-            model_ids = list(SUPPORTED_MODELS.keys())
-            default_idx = model_ids.index(DEFAULT_MODEL) if DEFAULT_MODEL in model_ids else 0
-            current_model = st.session_state.get("openrouter_model") or DEFAULT_MODEL
-            if current_model in model_ids:
-                default_idx = model_ids.index(current_model)
-            chosen = st.selectbox(
-                "모델",
-                model_ids,
-                index=default_idx,
-                format_func=lambda m: SUPPORTED_MODELS[m],
-                key="byok_model_select",
-            )
-            st.session_state["openrouter_model"] = chosen
-
-            if st.button("키 검증", key="byok_validate_btn", use_container_width=True):
-                with st.spinner("OpenRouter 키를 검증 중..."):
-                    result = validate_openrouter_key(st.session_state["openrouter_key"])
-                st.session_state["openrouter_validated"] = result
-                if result.get("valid"):
-                    parts = ["✅ 키 유효"]
-                    if result.get("label"):
-                        parts.append(f"라벨: {result['label']}")
-                    if result.get("credit_left") is not None:
-                        parts.append(f"잔액: ${result['credit_left']:.2f}")
-                    if result.get("models_count") is not None:
-                        parts.append(f"모델: {result['models_count']}개")
-                    parts.append(f"({mask_key(st.session_state['openrouter_key'])})")
-                    st.success(" · ".join(parts))
-                else:
-                    st.error(f"❌ {result.get('error', '검증 실패')}")
-        else:
-            st.session_state["openrouter_model"] = ""
-            st.session_state.pop("openrouter_validated", None)
-
-        st.caption(
-            "⚠️ 키는 서버를 거치지만 저장되지 않습니다. "
-            "[openrouter.ai/keys](https://openrouter.ai/keys) 에서 발급."
-        )
-
-        # 현재 사용 백엔드 배지
-        if st.session_state.get("openrouter_key"):
-            st.caption("📍 현재 백엔드: 🔑 OpenRouter (BYOK)")
-        else:
-            st.caption("📍 현재 백엔드: 📡 AWS Bedrock Haiku · 키 입력 없이 바로 사용")
-
-
 def render_sidebar(config: ConfigManager, db: InterviewDB):
     with st.sidebar:
         st.header("면접 설정")
-
-        # 기본 백엔드는 AWS Bedrock Haiku — 키 없이 즉시 사용 가능.
-        # 사용자 키는 BYOK(OpenRouter) 또는 legacy Gemini로 선택 입력.
-        _render_byok_sidebar()
+        st.caption("📡 AWS Bedrock Haiku · 키 입력 없이 바로 사용")
 
         if not config.is_configured():
             with st.expander("🔧 Gemini API 키 (선택 · 음성 전사 등)", expanded=False):
