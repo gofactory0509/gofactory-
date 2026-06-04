@@ -13,6 +13,12 @@ from backend.config import settings
 from backend.routers import byok, health, interview, records
 from backend.services.database import DatabaseService
 
+# MCP 서버 (Claude Desktop 등 외부 LLM 클라이언트가 사용자 구독으로 호출)
+try:
+    from backend.mcp_server import mcp as _mcp_server
+except Exception:  # fastmcp 미설치 환경에서도 FastAPI는 떠야 함
+    _mcp_server = None
+
 
 def create_app() -> FastAPI:
     """FastAPI 애플리케이션 인스턴스를 생성한다.
@@ -39,6 +45,10 @@ def create_app() -> FastAPI:
     app.include_router(records.router, prefix="/api", tags=["records"])
     # BYOK 라우터는 자체적으로 /byok prefix를 가지므로 여기서는 /api만 부여
     app.include_router(byok.router, prefix="/api")
+
+    # MCP 서버 마운트 (/mcp) — 정적 파일(/) 마운트보다 먼저 와야 함
+    if _mcp_server is not None:
+        app.mount("/mcp", _mcp_server.http_app(transport="streamable-http"))
 
     # 글로벌 예외 핸들러: 일관된 {"detail": "..."} 에러 형식
     @app.exception_handler(Exception)
