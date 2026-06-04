@@ -146,7 +146,7 @@ fields @timestamp, @message
 
 ## 6. EC2에서 S3 pull 받기 (별도 작업)
 
-EC2 인스턴스 (34.227.222.133)가 매일 새벽 03:00 KST에 최신 스냅샷을 받아 `interviews.db`를 갱신.
+EC2 인스턴스 (54.226.87.66)가 매일 새벽 03:00 KST에 최신 스냅샷을 받아 `interviews.db`를 갱신.
 
 `/etc/systemd/system/gofactory-sync.service`:
 ```ini

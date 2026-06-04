@@ -1,6 +1,6 @@
 # Go터뷰 EC2 배포 가이드
 
-> 대상: EC2 `34.227.222.133` (us-east-1 추정)
+> 대상: EC2 `54.226.87.66` (us-east-1 추정)
 > 백엔드: FastAPI + AWS Bedrock (Claude Sonnet 4.6 기본) + OpenRouter (사용자 BYOK)
 
 ---
@@ -29,8 +29,8 @@
 
 ### 1-1. SSH 접속
 ```bash
-ssh -i your-key.pem ec2-user@34.227.222.133
-# Ubuntu AMI라면 ubuntu@34.227.222.133
+ssh -i your-key.pem ec2-user@54.226.87.66
+# Ubuntu AMI라면 ubuntu@54.226.87.66
 ```
 
 ### 1-2. 시스템 패키지
@@ -86,7 +86,7 @@ BEDROCK_MODEL_ID=anthropic.claude-sonnet-4-6-20251015-v1:0
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-브라우저: `http://34.227.222.133:8000/docs` → Swagger UI 표시되면 OK.
+브라우저: `http://54.226.87.66:8000/docs` → Swagger UI 표시되면 OK.
 
 ### 2-2. Bedrock 동작 확인
 SSH 안에서:
@@ -144,7 +144,7 @@ sudo journalctl -u gofactory -f     # 실시간 로그
 
 ## 4. (선택) Nginx 리버스 프록시
 
-`http://34.227.222.133` (포트 80) 로 접속할 수 있게.
+`http://54.226.87.66` (포트 80) 로 접속할 수 있게.
 
 ```bash
 sudo nano /etc/nginx/conf.d/gofactory.conf
@@ -153,7 +153,7 @@ sudo nano /etc/nginx/conf.d/gofactory.conf
 ```nginx
 server {
     listen 80;
-    server_name 34.227.222.133;
+    server_name 54.226.87.66;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -175,7 +175,7 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-이후 `http://34.227.222.133` 접속 시 FastAPI로 프록시.
+이후 `http://54.226.87.66` 접속 시 FastAPI로 프록시.
 
 ---
 
